@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#e8eee2" />
+    <title>Fairway Practice | Disc Golf Simulator</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="stylesheet" href="./style.css" />
+    <script type="module" src="./script.js"></script>
+  </head>
+  <body>
+    <main class="practice-shell">
+      <header class="topbar">
+        <a class="brand" href="./" aria-label="Fairway Practice home">
+          <span class="brand-mark" aria-hidden="true"><span></span></span>
+          <span>FAIRWAY <b>PRACTICE</b></span>
+        </a>
+        <div class="course-chip"><span class="status-dot"></span> PRACTICE FIELD <span class="chip-divider">/</span> HOLE 01</div>
+      </header>
+
+      <section class="camera-setup-panel" aria-labelledby="camera-setup-title">
+        <div class="camera-setup-heading">
+          <div>
+            <p class="eyebrow">OPTIONAL HARDWARE</p>
+            <h2 id="camera-setup-title">Camera Setup</h2>
+            <p class="camera-setup-copy">Choose two webcams, then sample your disc color from Camera 1.</p>
+          </div>
+          <p class="camera-fps-note">Requests up to 60 FPS. Cameras limited to 30 FPS are supported.</p>
+        </div>
+
+        <div class="camera-grid">
+          <article class="camera-card">
+            <div class="camera-card-heading">
+              <h3>Camera 1</h3>
+              <span class="camera-state" id="camera1-state">STANDBY</span>
+            </div>
+            <label for="camera1-select">Camera 1</label>
+            <select id="camera1-select" name="camera1" aria-describedby="camera1-details">
+              <option value="">Checking for cameras…</option>
+            </select>
+            <div class="camera-preview" id="camera1-preview">
+              <video id="camera1-video" autoplay muted playsinline aria-label="Camera 1 live preview"></video>
+              <canvas class="detection-overlay" id="camera1-overlay" aria-hidden="true"></canvas>
+              <div class="camera-placeholder" id="camera1-placeholder" aria-hidden="true">
+                <span class="camera-placeholder-icon"></span>
+                <span>Preview appears here when started</span>
+              </div>
+            </div>
+            <div class="detection-readout">
+              <span class="detection-status" id="camera1-detection-state" data-state="waiting" data-testid="status-camera1-detection">SELECT COLOR</span>
+              <output class="detection-coordinates" id="camera1-coordinates" data-testid="text-camera1-coordinates">X — px · Y — px</output>
+            </div>
+            <p class="camera-device-details" id="camera1-details">Camera access starts when you click Start Cameras.</p>
+          </article>
+
+          <article class="camera-card">
+            <div class="camera-card-heading">
+              <h3>Camera 2</h3>
+              <span class="camera-state" id="camera2-state">STANDBY</span>
+            </div>
+            <label for="camera2-select">Camera 2</label>
+            <select id="camera2-select" name="camera2" aria-describedby="camera2-details">
+              <option value="">Checking for cameras…</option>
+            </select>
+            <div class="camera-preview" id="camera2-preview">
+              <video id="camera2-video" autoplay muted playsinline aria-label="Camera 2 live preview"></video>
+              <canvas class="detection-overlay" id="camera2-overlay" aria-hidden="true"></canvas>
+              <div class="camera-placeholder" id="camera2-placeholder" aria-hidden="true">
+                <span class="camera-placeholder-icon"></span>
+                <span>Preview appears here when started</span>
+              </div>
+            </div>
+            <div class="detection-readout">
+              <span class="detection-status" id="camera2-detection-state" data-state="waiting" data-testid="status-camera2-detection">SELECT COLOR</span>
+              <output class="detection-coordinates" id="camera2-coordinates" data-testid="text-camera2-coordinates">X — px · Y — px</output>
+            </div>
+            <p class="camera-device-details" id="camera2-details">Camera access starts when you click Start Cameras.</p>
+          </article>
+        </div>
+
+        <div class="detection-controls">
+          <div class="detection-controls-top">
+            <div class="detection-color-controls">
+              <button class="color-select-button" id="select-disc-color" type="button" data-testid="button-select-disc-color" disabled>Select Disc Color</button>
+              <div class="disc-color-sample" aria-live="polite">
+                <span class="disc-color-swatch" id="disc-color-swatch" aria-hidden="true"></span>
+                <span id="disc-color-value" data-testid="text-sampled-disc-color">Color not sampled</span>
+              </div>
+            </div>
+            <div class="sensitivity-control">
+              <div class="sensitivity-heading">
+                <label for="detection-sensitivity">Detection Sensitivity</label>
+                <output id="detection-sensitivity-value" for="detection-sensitivity">54</output>
+              </div>
+              <input id="detection-sensitivity" type="range" min="12" max="150" step="1" value="54" aria-describedby="detection-sensitivity-help" data-testid="input-detection-sensitivity">
+              <small id="detection-sensitivity-help">Higher values accept more color variation.</small>
+            </div>
+          </div>
+          <p class="detection-setup-hint" id="detection-setup-hint" role="status" aria-live="polite">Start both cameras, select a color, then click the disc in the Camera 1 preview.</p>
+        </div>
+
+        <div class="camera-action-row">
+          <div class="camera-actions">
+            <button class="camera-start-button" id="start-cameras" type="button">Start Cameras</button>
+            <button class="camera-stop-button" id="stop-cameras" type="button" disabled>Stop Cameras</button>
+          </div>
+          <p class="camera-status" id="camera-status" role="status" aria-live="polite">Checking for video cameras…</p>
+          <p class="camera-privacy-note">Video processing stays in this browser tab. No recording or upload.</p>
+        </div>
+      </section>
+
+      <section class="intro" aria-labelledby="page-title">
+        <div>
+          <p class="eyebrow">A LITTLE ROOM TO WORK ON IT</p>
+          <h1 id="page-title">Find your <em>line.</em></h1>
+          <p class="intro-copy">Set your release, pick a line, and see where the disc wants to go.</p>
+        </div>
+        <div class="distance-marker" aria-label="Basket is 300 feet away">
+          <span class="marker-icon" aria-hidden="true">◎</span>
+          <span><b>300</b><small>FEET TO BASKET</small></span>
+        </div>
+      </section>
+
+      <section class="course-card" aria-label="Disc golf hole view">
+        <div class="course-meta">
+          <span><span class="sun-icon" aria-hidden="true">◌</span> CALM CONDITIONS</span>
+          <span class="course-meta-right">STRAIGHTAWAY <i></i> 300 FT</span>
+        </div>
+        <div class="course-view" id="course-view">
+          <svg class="course-art" viewBox="0 0 1200 470" preserveAspectRatio="xMidYMid slice" role="img" aria-labelledby="scene-title scene-desc">
+            <title id="scene-title">A straight disc golf fairway from the tee</title>
+            <desc id="scene-desc">A green fairway bordered by trees leads to a basket 300 feet away.</desc>
+            <defs>
+              <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d7e7dd"/><stop offset="1" stop-color="#e8ecd9"/></linearGradient>
+              <linearGradient id="grass" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#91a96c"/><stop offset="1" stop-color="#6f8951"/></linearGradient>
+              <linearGradient id="fairway" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b5c88d"/><stop offset="1" stop-color="#9aaf72"/></linearGradient>
+              <linearGradient id="pad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#aaa99a"/><stop offset="1" stop-color="#8e8f81"/></linearGradient>
+              <filter id="disc-shadow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="4"/></filter>
+            </defs>
+            <rect width="1200" height="470" fill="url(#sky)"/>
+            <circle cx="1030" cy="72" r="31" fill="#f1d9a0" opacity=".7"/>
+            <path d="M0 220 Q210 177 420 212 T840 201 T1200 207 L1200 470 0 470Z" fill="#81976a"/>
+            <path d="M0 268 Q260 229 465 257 T840 245 T1200 259 L1200 470 0 470Z" fill="url(#grass)"/>
+            <path d="M388 470 Q485 301 547 222 Q587 195 604 195 Q633 195 662 222 Q727 311 830 470Z" fill="url(#fairway)"/>
+            <path d="M398 470 Q486 302 548 223" fill="none" stroke="#c6d39b" stroke-width="3" opacity=".48"/>
+            <path d="M820 470 Q715 302 660 223" fill="none" stroke="#839b62" stroke-width="3" opacity=".5"/>
+            <g opacity=".36" stroke="#d6dfa9" stroke-width="2">
+              <path d="M470 377 Q600 348 740 377"/><path d="M520 309 Q600 296 680 309"/><path d="M559 258 Q602 251 643 258"/>
+            </g>
+            <!-- Tree line -->
+            <g fill="#48634d">
+              <path d="M0 246 18 176 36 246Z"/><path d="M26 243 53 145 78 243Z"/><path d="M68 251 91 184 112 251Z"/>
+              <path d="M105 241 139 129 171 241Z"/><path d="M151 245 181 167 211 245Z"/><path d="M197 249 231 119 266 249Z"/>
+              <path d="M247 248 274 165 301 248Z"/><path d="M295 252 326 135 358 252Z"/><path d="M354 250 379 177 403 250Z"/>
+              <path d="M1200 245 1182 174 1164 245Z"/><path d="M1172 244 1144 141 1117 244Z"/><path d="M1126 248 1105 182 1084 248Z"/>
+              <path d="M1088 242 1053 126 1019 242Z"/><path d="M1043 246 1015 163 987 246Z"/><path d="M997 248 963 119 930 248Z"/>
+              <path d="M949 250 921 163 894 250Z"/><path d="M903 251 869 137 835 251Z"/><path d="M846 250 821 177 796 250Z"/>
+            </g>
+            <g fill="#5e7959" opacity=".9">
+              <path d="M5 246 31 184 57 246Z"/><path d="M117 243 146 151 174 243Z"/><path d="M224 249 247 160 270 249Z"/>
+              <path d="M1127 242 1152 163 1177 242Z"/><path d="M1020 245 1049 153 1079 245Z"/><path d="M933 248 957 159 981 248Z"/>
+            </g>
+            <!-- distant basket -->
+            <g class="basket">
+              <ellipse cx="603" cy="218" rx="14" ry="3" fill="#536447" opacity=".25"/>
+              <path d="M603 186v33" stroke="#545b4e" stroke-width="3"/>
+              <path d="M592 187h22l-3 13h-16Z" fill="#d5a34f" stroke="#725f3e" stroke-width="1.5"/>
+              <path d="M594 200h18l-3 15h-12Z" fill="none" stroke="#64715a" stroke-width="2"/>
+              <path d="M595 202l5 12m4-12v12m5-12-4 12" stroke="#64715a" stroke-width="1.5"/>
+              <path d="M595 215h17" stroke="#4b5648" stroke-width="2"/>
+              <circle cx="603" cy="184" r="2" fill="#d7a249"/>
+            </g>
+            <!-- tee pad -->
+            <path d="M465 470 500 411 700 411 735 470Z" fill="url(#pad)" stroke="#7e8275" stroke-width="2"/>
+            <path d="M500 416h200" stroke="#c4c1b1" stroke-width="2" opacity=".7"/>
+            <path d="M516 435h168" stroke="#bab9aa" stroke-width="1" stroke-dasharray="3 8" opacity=".55"/>
+            <path d="M584 407h32" stroke="#e2ddc9" stroke-width="3" opacity=".9"/>
+            <!-- Flight overlay -->
+            <path id="flight-path" class="flight-path" d="" aria-hidden="true"/>
+            <g id="landing-marker" class="landing-marker" aria-hidden="true">
+              <circle r="13" fill="#e98d5a" opacity=".25"/><circle r="5" fill="#e98d5a" stroke="#fff8e8" stroke-width="2"/>
+            </g>
+            <g id="disc" class="disc" aria-hidden="true">
+              <ellipse class="disc-shadow" cx="0" cy="13" rx="18" ry="5" fill="#24392d" opacity=".35" filter="url(#disc-shadow)"/>
+              <ellipse cx="0" cy="0" rx="19" ry="8" fill="#e7844c" stroke="#9b5033" stroke-width="1.5"/>
+              <ellipse cx="0" cy="-1" rx="11" ry="4" fill="none" stroke="#ffc28b" stroke-width="1.4"/>
+              <path d="M-16 0h32" stroke="#f6b178" stroke-width="1" opacity=".8"/>
+            </g>
+          </svg>
+          <div class="tee-label"><span class="tee-dot"></span> TEE 01 <span>YOU ARE HERE</span></div>
+          <div class="basket-callout"><span class="callout-line"></span><span>THE BASKET<small>300 FT</small></span></div>
+          <div class="flight-live" id="flight-live" aria-live="polite"></div>
+          <div class="shot-results" id="shot-results" aria-live="polite" aria-atomic="true" hidden>
+            <div><span>THROW DISTANCE</span><strong id="result-distance">—</strong></div>
+            <i></i>
+            <div><span id="remaining-label">TO THE BASKET</span><strong id="result-remaining">—</strong></div>
+          </div>
+          <div class="scene-caption">VIEW FROM THE TEE <span>·</span> STRAIGHT, WITH A LITTLE ROOM TO SHAPE IT</div>
+        </div>
+        <div class="course-footer">
+          <span><i class="legend-dot"></i> FAIRWAY</span><span><i class="legend-ring"></i> TARGET ZONE</span>
+          <span class="footer-note">No wind today. Just you and the line.</span>
+        </div>
+      </section>
+
+
+      <section class="disc-selection-panel" aria-labelledby="disc-selection-title">
+        <div class="disc-selection-heading">
+          <div>
+            <p class="eyebrow">WHAT ARE YOU THROWING?</p>
+            <h2 id="disc-selection-title">Disc selection</h2>
+            <p class="disc-selection-copy">Enter the flight numbers printed on your disc. They will change the simulated flight.</p>
+          </div>
+          <div class="selected-disc-badge" aria-live="polite">
+            <span id="selected-disc-name">Custom Disc</span>
+            <strong id="selected-disc-numbers">9 / 5 / -1 / 2</strong>
+          </div>
+        </div>
+
+        <div class="disc-fields">
+          <label>Disc name
+            <input id="disc-name" type="text" maxlength="40" value="Custom Disc" placeholder="Example: Valkyrie">
+          </label>
+          <label>Speed
+            <input id="disc-speed" type="number" min="1" max="15" step="1" value="9">
+          </label>
+          <label>Glide
+            <input id="disc-glide" type="number" min="1" max="7" step="1" value="5">
+          </label>
+          <label>Turn
+            <input id="disc-turn" type="number" min="-5" max="1" step="0.5" value="-1">
+          </label>
+          <label>Fade
+            <input id="disc-fade" type="number" min="0" max="5" step="0.5" value="2">
+          </label>
+          <label>Throw style
+            <select id="throw-style">
+              <option value="RHBH">Right-hand backhand</option>
+              <option value="LHBH">Left-hand backhand</option>
+              <option value="RHFH">Right-hand forehand</option>
+              <option value="LHFH">Left-hand forehand</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="disc-save-row">
+          <button id="save-disc" class="save-disc-button" type="button">Save disc</button>
+          <label class="saved-disc-label">Saved discs
+            <select id="saved-discs">
+              <option value="">Choose a saved disc…</option>
+            </select>
+          </label>
+          <span id="disc-save-status" class="disc-save-status" aria-live="polite"></span>
+        </div>
+      </section>
+
+      <section class="practice-panel" aria-labelledby="controls-title">
+        <div class="controls-heading">
+          <div><p class="eyebrow">DIAL IN YOUR RELEASE</p><h2 id="controls-title">Shot setup</h2></div>
+          <p class="setup-tip"><span aria-hidden="true">↗</span> Small changes make a big difference.</p>
+        </div>
+        <form id="shot-form">
+          <div class="controls-grid">
+            <div class="control-group">
+              <div class="control-label"><label for="speed">Throw speed</label><output id="speed-value" for="speed">55 <small>mph</small></output></div>
+              <input id="speed" name="speed" type="range" min="30" max="75" value="55" step="1" aria-describedby="speed-hint" />
+              <div class="range-ends"><span>30 mph</span><span>75 mph</span></div>
+              <span class="control-hint" id="speed-hint">A smooth, controlled drive</span>
+            </div>
+            <div class="control-group">
+              <div class="control-label"><label for="aim">Left / right aim</label><output id="aim-value" for="aim">0° <small>center</small></output></div>
+              <input id="aim" name="aim" type="range" min="-30" max="30" value="0" step="1" />
+              <div class="range-ends"><span>30° left</span><span>30° right</span></div>
+              <span class="control-hint">Choose your starting line</span>
+            </div>
+            <div class="control-group">
+              <div class="control-label"><label for="launch">Launch angle</label><output id="launch-value" for="launch">8°</output></div>
+              <input id="launch" name="launch" type="range" min="0" max="25" value="8" step="1" />
+              <div class="range-ends"><span>0° flat</span><span>25° high</span></div>
+              <span class="control-hint">Higher gives the disc more airtime</span>
+            </div>
+            <div class="control-group">
+              <div class="control-label"><label for="hyzer">Hyzer / anhyzer</label><output id="hyzer-value" for="hyzer">0° <small>flat</small></output></div>
+              <input id="hyzer" name="hyzer" type="range" min="-20" max="20" value="0" step="1" />
+              <div class="range-ends"><span>20° hyzer</span><span>20° anhyzer</span></div>
+              <span class="control-hint">Shape the finish of your flight</span>
+            </div>
+          </div>
+          <div class="action-row">
+            <div class="action-note"><span class="action-bullet"></span><span>Ready when you are.<small>Your settings stay put when you reset.</small></span></div>
+            <div class="actions">
+              <button class="reset-button" id="reset-button" type="button"><span aria-hidden="true">↺</span> Reset hole</button>
+              <button class="throw-button" id="throw-button" type="submit"><span class="throw-icon" aria-hidden="true">➜</span> Throw disc</button>
+            </div>
+          </div>
+        </form>
+      </section>
+      <footer class="page-footer"><span>GOOD THROWS ARE BUILT, NOT RUSHED.</span><span>FAIRWAY PRACTICE <b>·</b> FIELD NOTES 01</span></footer>
+    </main>
+  </body>
+</html>

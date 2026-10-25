@@ -378,8 +378,8 @@ let recentThrowSpeeds = [];
 
 let autoThrowTimer = null;
 let lastAutomaticThrowAt = -Infinity;
-const AUTO_THROW_COOLDOWN_MS = 2500;
-const AUTO_THROW_SETTLE_MS = 180;
+const AUTO_THROW_COOLDOWN_MS = 1800;
+const AUTO_THROW_SETTLE_MS = 60;
 const AUTO_THROW_MIN_MPH = 2;
 
 function scheduleAutomaticCameraThrow() {
@@ -471,7 +471,7 @@ function recordCamera1Speed(sourceX, sourceY, timestamp) {
         measuredThrowSpeedMph = estimate;
         measuredSpeedOutput.textContent = `${estimate.toFixed(1)} mph`;
         useMeasuredSpeedButton.disabled = false;
-        speedCalibrationStatus.textContent = `Speed detected: ${estimate.toFixed(1)} mph. Launching automatically…`;
+        speedCalibrationStatus.textContent = `Speed detected: ${estimate.toFixed(1)} mph. Throw captured — launching…`;
         scheduleAutomaticCameraThrow();
       }
     }
@@ -999,7 +999,7 @@ function getCameraErrorMessage(error) {
 }
 
 function getCameraStream(deviceId) {
-  const video = { frameRate: { ideal: 60 } };
+  const video = { frameRate: { ideal: 60, min: 30 } };
   if (deviceId) video.deviceId = { exact: deviceId };
   return cameraMediaDevices.getUserMedia({ audio: false, video });
 }

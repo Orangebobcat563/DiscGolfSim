@@ -115,6 +115,15 @@
           <p class="detection-setup-hint" id="speed-calibration-status" role="status" aria-live="polite">Start Camera 1 first.</p>
         </div>
 
+        <div class="speed-calibration" aria-labelledby="camera2-measurement-title">
+          <div class="speed-calibration-heading">
+            <div><p class="eyebrow">CAMERA 2 MEASUREMENT</p><h3 id="camera2-measurement-title">Release direction &amp; disc angle</h3></div>
+            <div><output class="measured-speed" id="camera2-aim-output">—°</output> <output class="measured-speed" id="camera2-hyzer-output">—°</output></div>
+          </div>
+          <p class="calibration-help">Place Camera 2 above or in front of the throwing lane so it can see the disc move through the frame. The first number is left/right aim; the second is the detected disc tilt.</p>
+          <p class="detection-setup-hint" id="camera2-measurement-status" role="status" aria-live="polite">Start Camera 2 and throw through both camera views.</p>
+        </div>
+
         <div class="camera-action-row">
           <div class="camera-actions">
             <button class="camera-start-button" id="start-cameras" type="button">Start Cameras</button>

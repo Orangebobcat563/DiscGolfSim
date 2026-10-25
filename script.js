@@ -234,7 +234,7 @@ function finishShot(shot, id) {
 }
 
 function throwDisc(event) {
-  event.preventDefault();
+  if (event) event.preventDefault();
   cancelAnimationFrame(animationFrame);
   const id = ++shotId;
   const shot = getShot();
@@ -363,7 +363,7 @@ const PROCESS_WIDTH = 320;
 const PROCESS_HEIGHT = 180;
 const MIN_DETECTION_PIXELS = 12;
 const MAX_DETECTION_FRACTION = 0.28;
-const DETECTION_INTERVAL_MS = 33;
+const DETECTION_INTERVAL_MS = 12;
 let selectedDiscColor = null;
 let colorPicking = false;
 let detectionAnimationFrame = 0;
@@ -375,6 +375,11 @@ let pixelsPerInch = null;
 let lastCamera1Detection = null;
 let measuredThrowSpeedMph = null;
 let recentThrowSpeeds = [];
+
+let lastCamera2Detection = null;
+let camera2AimDegrees = null;
+let camera2HyzerDegrees = null;
+let camera2MeasurementAt = -Infinity;
 
 let autoThrowTimer = null;
 let lastAutomaticThrowAt = -Infinity;
@@ -390,6 +395,13 @@ function scheduleAutomaticCameraThrow() {
   autoThrowTimer = setTimeout(() => {
     if (isThrowing || !Number.isFinite(measuredThrowSpeedMph)) return;
     controls.speed.value = String(Math.round(Math.max(Number(controls.speed.min), Math.min(Number(controls.speed.max), measuredThrowSpeedMph))));
+    const camera2IsFresh = performance.now() - camera2MeasurementAt < 700;
+    if (camera2IsFresh && Number.isFinite(camera2AimDegrees)) {
+      controls.aim.value = String(Math.round(Math.max(Number(controls.aim.min), Math.min(Number(controls.aim.max), camera2AimDegrees))));
+    }
+    if (camera2IsFresh && Number.isFinite(camera2HyzerDegrees)) {
+      controls.hyzer.value = String(Math.round(Math.max(Number(controls.hyzer.min), Math.min(Number(controls.hyzer.max), camera2HyzerDegrees))));
+    }
     updateLabels();
     lastAutomaticThrowAt = performance.now();
     recentThrowSpeeds = [];
@@ -405,6 +417,43 @@ const startSpeedCalibrationButton = document.querySelector("#start-speed-calibra
 const useMeasuredSpeedButton = document.querySelector("#use-measured-speed");
 const speedCalibrationStatus = document.querySelector("#speed-calibration-status");
 const measuredSpeedOutput = document.querySelector("#measured-speed");
+const camera2AimOutput = document.querySelector("#camera2-aim-output");
+const camera2HyzerOutput = document.querySelector("#camera2-hyzer-output");
+const camera2MeasurementStatus = document.querySelector("#camera2-measurement-status");
+
+function recordCamera2Throw(sourceX, sourceY, timestamp, region) {
+  const current = { x: sourceX, y: sourceY, t: timestamp };
+  if (lastCamera2Detection) {
+    const dt = (timestamp - lastCamera2Detection.t) / 1000;
+    const dx = sourceX - lastCamera2Detection.x;
+    const dy = sourceY - lastCamera2Detection.y;
+    const movement = Math.hypot(dx, dy);
+
+    // Camera 2 should look down/front at the throwing lane.
+    // Motion across its image gives left/right launch direction.
+    if (dt > 0.008 && dt < 0.20 && movement > 3) {
+      const aim = Math.max(-25, Math.min(25, Math.atan2(dx, Math.max(1, Math.abs(dy))) * 180 / Math.PI));
+      camera2AimDegrees = aim;
+
+      // The tracked disc blob becomes more elliptical as it tilts.
+      // Principal-axis angle gives a useful signed hyzer/anhyzer estimate.
+      if (Number.isFinite(region.orientationDeg) && region.elongation > 1.08) {
+        let tilt = region.orientationDeg;
+        while (tilt > 90) tilt -= 180;
+        while (tilt < -90) tilt += 180;
+        camera2HyzerDegrees = Math.max(-35, Math.min(35, tilt * 0.55));
+      }
+
+      camera2MeasurementAt = timestamp;
+      if (camera2AimOutput) camera2AimOutput.textContent = `${aim.toFixed(1)}°`;
+      if (camera2HyzerOutput) camera2HyzerOutput.textContent =
+        Number.isFinite(camera2HyzerDegrees) ? `${camera2HyzerDegrees.toFixed(1)}°` : "flat / unknown";
+      if (camera2MeasurementStatus) camera2MeasurementStatus.textContent =
+        "Camera 2 captured the release line. It will be used on the automatic throw.";
+    }
+  }
+  lastCamera2Detection = current;
+}
 
 function updateCalibrationButtonState() {
   const camera1Running = Boolean(cameraSlots[0].stream);
@@ -654,6 +703,7 @@ function findLargestColorRegion(slot, imageData) {
     let minY = PROCESS_HEIGHT;
     let maxX = 0;
     let maxY = 0;
+    let sumX = 0, sumY = 0, sumXX = 0, sumYY = 0, sumXY = 0;
     queue[tail++] = start;
     mask[start] = 0;
 
@@ -665,6 +715,7 @@ function findLargestColorRegion(slot, imageData) {
       if (x > maxX) maxX = x;
       if (y < minY) minY = y;
       if (y > maxY) maxY = y;
+      sumX += x; sumY += y; sumXX += x * x; sumYY += y * y; sumXY += x * y;
 
       if (x > 0 && mask[pixel - 1]) {
         mask[pixel - 1] = 0;
@@ -685,7 +736,17 @@ function findLargestColorRegion(slot, imageData) {
     }
 
     if (!largest || tail > largest.area) {
-      largest = { area: tail, minX, minY, maxX, maxY };
+      const n = Math.max(1, tail);
+      const meanX = sumX / n, meanY = sumY / n;
+      const varX = Math.max(0, sumXX / n - meanX * meanX);
+      const varY = Math.max(0, sumYY / n - meanY * meanY);
+      const covXY = sumXY / n - meanX * meanY;
+      const orientationDeg = 0.5 * Math.atan2(2 * covXY, varX - varY) * 180 / Math.PI;
+      const trace = varX + varY;
+      const root = Math.sqrt(Math.max(0, (varX - varY) ** 2 + 4 * covXY ** 2));
+      const major = Math.sqrt(Math.max(0.001, (trace + root) / 2));
+      const minor = Math.sqrt(Math.max(0.001, (trace - root) / 2));
+      largest = { area: tail, minX, minY, maxX, maxY, orientationDeg, elongation: major / minor };
     }
   }
 
@@ -733,6 +794,7 @@ function processCameraDetection(slot) {
     const region = findLargestColorRegion(slot, frame);
     if (!region) {
       if (slot === cameraSlots[0]) lastCamera1Detection = null;
+      if (slot === cameraSlots[1]) lastCamera2Detection = null;
       setDetectionReadout(slot, "NO DISC", "no-disc");
       clearDetectionOverlay(slot);
       return;
@@ -742,7 +804,9 @@ function processCameraDetection(slot) {
     const normalizedY = (region.minY + region.maxY + 1) / (2 * PROCESS_HEIGHT);
     const sourceX = Math.round(crop.x + normalizedX * crop.width);
     const sourceY = Math.round(crop.y + normalizedY * crop.height);
-    if (slot === cameraSlots[0]) recordCamera1Speed(sourceX, sourceY, performance.now());
+    const detectionTime = performance.now();
+    if (slot === cameraSlots[0]) recordCamera1Speed(sourceX, sourceY, detectionTime);
+    if (slot === cameraSlots[1]) recordCamera2Throw(sourceX, sourceY, detectionTime, region);
     setDetectionReadout(
       slot,
       "DISC DETECTED",

@@ -380,7 +380,7 @@ let autoThrowTimer = null;
 let lastAutomaticThrowAt = -Infinity;
 const AUTO_THROW_COOLDOWN_MS = 2500;
 const AUTO_THROW_SETTLE_MS = 180;
-const AUTO_THROW_MIN_MPH = 12;
+const AUTO_THROW_MIN_MPH = 2;
 
 function scheduleAutomaticCameraThrow() {
   if (isThrowing || !Number.isFinite(measuredThrowSpeedMph)) return;
@@ -463,7 +463,7 @@ function recordCamera1Speed(sourceX, sourceY, timestamp) {
     const pixels = Math.hypot(sourceX-lastCamera1Detection.x, sourceY-lastCamera1Detection.y);
     if (dt > .012 && dt < .18) {
       const mph = ((pixels/pixelsPerInch)/dt)/17.6;
-      if (mph >= 8 && mph <= 100) {
+      if (mph >= 2 && mph <= 100) {
         recentThrowSpeeds.push(mph);
         recentThrowSpeeds = recentThrowSpeeds.slice(-6);
         const sorted = [...recentThrowSpeeds].sort((a,b)=>a-b);

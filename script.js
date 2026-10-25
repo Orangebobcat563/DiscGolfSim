@@ -379,14 +379,64 @@ let recentThrowSpeeds = [];
 let lastCamera2Detection = null;
 let camera2AimDegrees = null;
 let camera2HyzerDegrees = null;
+let camera2Roundness = null;
 let camera2MeasurementAt = -Infinity;
 let camera2LastSeenAt = -Infinity;
 
 let autoThrowTimer = null;
 let lastAutomaticThrowAt = -Infinity;
+let discDetectionStartedAt = -Infinity;
+let detectionThrowArmed = true;
+const DETECTION_THROW_DELAY_MS = 90;
+const DETECTION_REARM_MS = 450;
+
 const AUTO_THROW_COOLDOWN_MS = 1800;
 const AUTO_THROW_SETTLE_MS = 140;
 const AUTO_THROW_MIN_MPH = 2;
+
+
+function triggerThrowFromDiscDetection(timestamp) {
+  if (!detectionThrowArmed) return;
+  if (timestamp - lastAutomaticThrowAt < AUTO_THROW_COOLDOWN_MS) return;
+
+  if (!Number.isFinite(discDetectionStartedAt) || discDetectionStartedAt < 0) {
+    discDetectionStartedAt = timestamp;
+  }
+
+  // A tiny delay filters a one-frame color glitch, but does not wait for speed.
+  if (timestamp - discDetectionStartedAt < DETECTION_THROW_DELAY_MS) return;
+
+  detectionThrowArmed = false;
+  lastAutomaticThrowAt = timestamp;
+
+  // Use measured speed if available; otherwise keep the current simulator speed.
+  if (Number.isFinite(measuredThrowSpeedMph)) {
+    controls.speed.value = String(Math.round(
+      Math.max(Number(controls.speed.min),
+      Math.min(Number(controls.speed.max), measuredThrowSpeedMph))
+    ));
+  }
+
+  const camera2IsFresh = performance.now() - camera2MeasurementAt < 1200;
+  if (camera2IsFresh && Number.isFinite(camera2AimDegrees)) {
+    controls.aim.value = String(Math.round(
+      Math.max(Number(controls.aim.min),
+      Math.min(Number(controls.aim.max), camera2AimDegrees))
+    ));
+  }
+  if (camera2IsFresh && Number.isFinite(camera2HyzerDegrees)) {
+    controls.hyzer.value = String(Math.round(
+      Math.max(Number(controls.hyzer.min),
+      Math.min(Number(controls.hyzer.max), camera2HyzerDegrees))
+    ));
+  }
+
+  updateLabels();
+  if (speedCalibrationStatus) {
+    speedCalibrationStatus.textContent = "DISC DETECTED — throwing simulator disc now";
+  }
+  throwDisc();
+}
 
 function scheduleAutomaticCameraThrow() {
   if (!Number.isFinite(measuredThrowSpeedMph)) return;
@@ -420,6 +470,7 @@ const speedCalibrationStatus = document.querySelector("#speed-calibration-status
 const measuredSpeedOutput = document.querySelector("#measured-speed");
 const camera2AimOutput = document.querySelector("#camera2-aim-output");
 const camera2HyzerOutput = document.querySelector("#camera2-hyzer-output");
+const camera2RoundnessOutput = document.querySelector("#camera2-roundness-output");
 const camera2MeasurementStatus = document.querySelector("#camera2-measurement-status");
 
 function recordCamera2Throw(sourceX, sourceY, timestamp, region) {
@@ -439,19 +490,38 @@ function recordCamera2Throw(sourceX, sourceY, timestamp, region) {
       const aim = Math.max(-25, Math.min(25, rawAim));
       camera2AimDegrees = aim;
 
-      // The tracked disc blob becomes more elliptical as it tilts.
-      // Principal-axis angle gives a useful signed hyzer/anhyzer estimate.
-      if (Number.isFinite(region.orientationDeg) && region.elongation > 1.02) {
-        let tilt = region.orientationDeg;
-        while (tilt > 90) tilt -= 180;
-        while (tilt < -90) tilt += 180;
-        camera2HyzerDegrees = Math.max(-35, Math.min(35, tilt * 0.55));
+      // Camera 2 estimates hyzer/anhyzer from how round the disc looks.
+      // Face-on disc = close to a circle. More tilt = a thinner ellipse.
+      // minor/major axis ratio is our "roundness" value (1.0 = round).
+      if (Number.isFinite(region.elongation) && region.elongation >= 1) {
+        const roundness = Math.max(0, Math.min(1, 1 / region.elongation));
+        camera2Roundness = roundness;
+
+        // Approximate physical tilt: projected circle -> ellipse, ratio ~= cos(tilt).
+        const tiltMagnitude = Math.acos(Math.max(0.05, roundness)) * 180 / Math.PI;
+
+        // Roundness gives magnitude; the ellipse orientation supplies the side/sign.
+        let orientation = Number.isFinite(region.orientationDeg) ? region.orientationDeg : 0;
+        while (orientation > 90) orientation -= 180;
+        while (orientation < -90) orientation += 180;
+
+        // Near-round discs do not have a trustworthy orientation, so call them flat.
+        if (roundness > 0.92 || tiltMagnitude < 8) {
+          camera2HyzerDegrees = 0;
+        } else {
+          const sign = orientation >= 0 ? 1 : -1;
+          camera2HyzerDegrees = Math.max(-45, Math.min(45, sign * tiltMagnitude));
+        }
       }
 
       camera2MeasurementAt = timestamp;
       if (camera2AimOutput) camera2AimOutput.textContent = `${aim.toFixed(1)}°`;
       if (camera2HyzerOutput) camera2HyzerOutput.textContent =
-        Number.isFinite(camera2HyzerDegrees) ? `${camera2HyzerDegrees.toFixed(1)}°` : "flat / unknown";
+        Number.isFinite(camera2HyzerDegrees)
+          ? `${camera2HyzerDegrees > 2 ? "Hyzer " : camera2HyzerDegrees < -2 ? "Anhyzer " : "Flat "}${Math.abs(camera2HyzerDegrees).toFixed(1)}°`
+          : "unknown";
+      if (camera2RoundnessOutput) camera2RoundnessOutput.textContent =
+        Number.isFinite(camera2Roundness) ? `${Math.round(camera2Roundness * 100)}% round` : "—";
       if (camera2MeasurementStatus) camera2MeasurementStatus.textContent =
         "Camera 2 captured the release line. It will be used on the automatic throw.";
     }
@@ -525,7 +595,7 @@ function recordCamera1Speed(sourceX, sourceY, timestamp) {
         measuredSpeedOutput.textContent = `${estimate.toFixed(1)} mph`;
         useMeasuredSpeedButton.disabled = false;
         speedCalibrationStatus.textContent = `Speed detected: ${estimate.toFixed(1)} mph. Throw captured — launching…`;
-        scheduleAutomaticCameraThrow();
+        /* throw is triggered directly by disc detection */
       }
     }
   }
@@ -797,7 +867,13 @@ function processCameraDetection(slot) {
     const frame = slot.processingContext.getImageData(0, 0, PROCESS_WIDTH, PROCESS_HEIGHT);
     const region = findLargestColorRegion(slot, frame);
     if (!region) {
-      if (slot === cameraSlots[0]) lastCamera1Detection = null;
+      if (slot === cameraSlots[0]) {
+        lastCamera1Detection = null;
+        if (performance.now() - discDetectionStartedAt > DETECTION_REARM_MS) {
+          detectionThrowArmed = true;
+          discDetectionStartedAt = -Infinity;
+        }
+      }
       if (slot === cameraSlots[1] && performance.now() - camera2LastSeenAt > 220) lastCamera2Detection = null;
       setDetectionReadout(slot, "NO DISC", "no-disc");
       clearDetectionOverlay(slot);
@@ -809,7 +885,10 @@ function processCameraDetection(slot) {
     const sourceX = Math.round(crop.x + normalizedX * crop.width);
     const sourceY = Math.round(crop.y + normalizedY * crop.height);
     const detectionTime = performance.now();
-    if (slot === cameraSlots[0]) recordCamera1Speed(sourceX, sourceY, detectionTime);
+    if (slot === cameraSlots[0]) {
+      recordCamera1Speed(sourceX, sourceY, detectionTime);
+      triggerThrowFromDiscDetection(detectionTime);
+    }
     if (slot === cameraSlots[1]) recordCamera2Throw(sourceX, sourceY, detectionTime, region);
     setDetectionReadout(
       slot,

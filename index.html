@@ -118,9 +118,9 @@
         <div class="speed-calibration" aria-labelledby="camera2-measurement-title">
           <div class="speed-calibration-heading">
             <div><p class="eyebrow">CAMERA 2 MEASUREMENT</p><h3 id="camera2-measurement-title">Release direction &amp; disc angle</h3></div>
-            <div><output class="measured-speed" id="camera2-aim-output">—°</output> <output class="measured-speed" id="camera2-hyzer-output">—°</output></div>
+            <div><output class="measured-speed" id="camera2-aim-output">—°</output> <output class="measured-speed" id="camera2-hyzer-output">—°</output> <output class="measured-speed" id="camera2-roundness-output">—</output></div>
           </div>
-          <p class="calibration-help">Place Camera 2 above or in front of the throwing lane so it can see the disc move through the frame. The first number is left/right aim; the second is the detected disc tilt.</p>
+          <p class="calibration-help">Place Camera 2 above or in front of the throwing lane so it can see the disc move through the frame. The first number is left/right aim. Camera 2 also checks how round the disc looks: a round disc is flatter, while a thinner oval means more tilt. It uses that shape plus the oval direction to estimate hyzer or anhyzer.</p>
           <p class="detection-setup-hint" id="camera2-measurement-status" role="status" aria-live="polite">Start Camera 2 and throw through both camera views.</p>
         </div>
 
@@ -315,7 +315,7 @@
             <div class="action-note"><span class="action-bullet"></span><span>Ready when you are.<small>Your settings stay put when you reset.</small></span></div>
             <div class="actions">
               <button class="reset-button" id="reset-button" type="button"><span aria-hidden="true">↺</span> Reset hole</button>
-              <button class="throw-button" id="throw-button" type="submit"><span class="throw-icon" aria-hidden="true">➜</span> Throw disc</button>
+              
             </div>
           </div>
         </form>

@@ -380,22 +380,23 @@ let lastCamera2Detection = null;
 let camera2AimDegrees = null;
 let camera2HyzerDegrees = null;
 let camera2MeasurementAt = -Infinity;
+let camera2LastSeenAt = -Infinity;
 
 let autoThrowTimer = null;
 let lastAutomaticThrowAt = -Infinity;
 const AUTO_THROW_COOLDOWN_MS = 1800;
-const AUTO_THROW_SETTLE_MS = 60;
+const AUTO_THROW_SETTLE_MS = 140;
 const AUTO_THROW_MIN_MPH = 2;
 
 function scheduleAutomaticCameraThrow() {
-  if (isThrowing || !Number.isFinite(measuredThrowSpeedMph)) return;
+  if (!Number.isFinite(measuredThrowSpeedMph)) return;
   if (measuredThrowSpeedMph < AUTO_THROW_MIN_MPH) return;
   if (performance.now() - lastAutomaticThrowAt < AUTO_THROW_COOLDOWN_MS) return;
   clearTimeout(autoThrowTimer);
   autoThrowTimer = setTimeout(() => {
-    if (isThrowing || !Number.isFinite(measuredThrowSpeedMph)) return;
+    if (!Number.isFinite(measuredThrowSpeedMph)) return;
     controls.speed.value = String(Math.round(Math.max(Number(controls.speed.min), Math.min(Number(controls.speed.max), measuredThrowSpeedMph))));
-    const camera2IsFresh = performance.now() - camera2MeasurementAt < 700;
+    const camera2IsFresh = performance.now() - camera2MeasurementAt < 1200;
     if (camera2IsFresh && Number.isFinite(camera2AimDegrees)) {
       controls.aim.value = String(Math.round(Math.max(Number(controls.aim.min), Math.min(Number(controls.aim.max), camera2AimDegrees))));
     }
@@ -406,7 +407,7 @@ function scheduleAutomaticCameraThrow() {
     lastAutomaticThrowAt = performance.now();
     recentThrowSpeeds = [];
     lastCamera1Detection = null;
-    speedCalibrationStatus.textContent = `Automatic throw: ${controls.speed.value} mph.`;
+    speedCalibrationStatus.textContent = `AUTO THROW: ${controls.speed.value} mph · launching simulator now`;
     throwDisc();
   }, AUTO_THROW_SETTLE_MS);
 }
@@ -422,6 +423,7 @@ const camera2HyzerOutput = document.querySelector("#camera2-hyzer-output");
 const camera2MeasurementStatus = document.querySelector("#camera2-measurement-status");
 
 function recordCamera2Throw(sourceX, sourceY, timestamp, region) {
+  camera2LastSeenAt = timestamp;
   const current = { x: sourceX, y: sourceY, t: timestamp };
   if (lastCamera2Detection) {
     const dt = (timestamp - lastCamera2Detection.t) / 1000;
@@ -432,12 +434,14 @@ function recordCamera2Throw(sourceX, sourceY, timestamp, region) {
     // Camera 2 should look down/front at the throwing lane.
     // Motion across its image gives left/right launch direction.
     if (dt > 0.008 && dt < 0.20 && movement > 3) {
-      const aim = Math.max(-25, Math.min(25, Math.atan2(dx, Math.max(1, Math.abs(dy))) * 180 / Math.PI));
+      const forward = Math.max(1, Math.abs(dy));
+      const rawAim = Math.atan2(dx, forward) * 180 / Math.PI;
+      const aim = Math.max(-25, Math.min(25, rawAim));
       camera2AimDegrees = aim;
 
       // The tracked disc blob becomes more elliptical as it tilts.
       // Principal-axis angle gives a useful signed hyzer/anhyzer estimate.
-      if (Number.isFinite(region.orientationDeg) && region.elongation > 1.08) {
+      if (Number.isFinite(region.orientationDeg) && region.elongation > 1.02) {
         let tilt = region.orientationDeg;
         while (tilt > 90) tilt -= 180;
         while (tilt < -90) tilt += 180;
@@ -794,7 +798,7 @@ function processCameraDetection(slot) {
     const region = findLargestColorRegion(slot, frame);
     if (!region) {
       if (slot === cameraSlots[0]) lastCamera1Detection = null;
-      if (slot === cameraSlots[1]) lastCamera2Detection = null;
+      if (slot === cameraSlots[1] && performance.now() - camera2LastSeenAt > 220) lastCamera2Detection = null;
       setDetectionReadout(slot, "NO DISC", "no-disc");
       clearDetectionOverlay(slot);
       return;

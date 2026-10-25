@@ -152,43 +152,45 @@ function getShot() {
   const profile = getDiscProfile();
   const flightDirection = getFlightDirection(profile.style);
 
-  // Flight-number model:
-  // Speed is the power requirement, not a distance bonus by itself.
-  // A faster-rated disc needs a faster release before its listed Turn appears.
-  const cruiseMph = 18 + profile.speed * 3.15;
-  const powerRatio = speed / cruiseMph;
+  // Speed number = power requirement, not free distance.
+  const ratedPowerMph = 20 + profile.speed * 3.0;
+  const powerRatio = Math.max(0.1, speed / ratedPowerMph);
+
+  // Listed turn becomes available as the disc reaches its intended speed.
   const turnActivation = Math.max(0, Math.min(1.15, (powerRatio - 0.48) / 0.52));
   const underpowered = Math.max(0, Math.min(1, 1 - powerRatio));
 
-  // Glide mainly controls carry once the disc is moving fast enough.
-  const glideCarry = 0.78 + profile.glide * 0.055;
-  const launchEfficiency = Math.max(0.58, 1 - Math.pow((launchAngle - 9) / 25, 2) * 0.22);
-  const tiltPenalty = Math.max(0.72, 1 - Math.abs(hyzerAngle) * 0.006);
+  // Glide affects carry, while release speed remains the main distance driver.
+  const glideCarry = 0.80 + profile.glide * 0.052;
+  const launchEfficiency = Math.max(0.62, 1 - Math.pow((launchAngle - 9) / 25, 2) * 0.20);
+  const tiltEfficiency = Math.max(0.75, 1 - Math.abs(hyzerAngle) * 0.005);
 
-  // Release velocity remains the main source of distance. Low-speed throws stay short.
-  // High-speed drivers do not magically fly farther when they are underpowered.
-  const classPenalty = 1 - Math.max(0, profile.speed - speed / 4.3) * 0.025;
+  // High-speed discs lose efficiency when thrown too slowly.
+  const speedMismatch = Math.max(0, profile.speed - speed / 4.5);
+  const discEfficiency = Math.max(0.64, 1 - speedMismatch * 0.024);
+
   const distance = Math.round(Math.max(
     4,
-    speed * 4.85 * glideCarry * launchEfficiency * tiltPenalty * Math.max(0.62, classPenalty)
+    speed * 4.8 * glideCarry * launchEfficiency * tiltEfficiency * discEfficiency
   ));
 
   const downrange = distance * Math.cos(aimRadians);
   const aimDrift = distance * Math.sin(aimRadians);
 
-  // Listed negative Turn is the high-speed movement opposite the fade direction.
-  // Hyzer suppresses some turn; anhyzer exposes more of it.
+  // Hyzer reduces high-speed turn; anhyzer increases it.
   const hyzerTurnFactor = Math.max(0.35, Math.min(1.45, 1 - hyzerAngle / 38));
   const turnStrength = Math.max(0, -profile.turn) * turnActivation * hyzerTurnFactor;
-  const turnDrift = -flightDirection * turnStrength * (distance / 300) * 22;
+  const turnDrift =
+    -flightDirection * turnStrength * (distance / 300) * 21;
 
-  // Fade takes over as the disc slows. Underpowered discs fade earlier/harder.
-  const fadeActivation = 0.62 + underpowered * 0.95 + Math.max(0, 0.82 - turnActivation) * 0.25;
-  const fadeDrift = flightDirection * profile.fade * fadeActivation * (distance / 300) * 18;
+  // Fade becomes more dominant as speed falls and when a disc is underpowered.
+  const fadeActivation =
+    0.60 + underpowered * 0.90 + Math.max(0, 0.78 - turnActivation) * 0.24;
+  const fadeDrift =
+    flightDirection * profile.fade * fadeActivation * (distance / 300) * 18;
 
-  // Release angle has an immediate directional effect and also changes the
-  // turn/fade balance above. Positive/negative follows the existing UI convention.
-  const releaseDrift = flightDirection * hyzerAngle * (distance / 300) * 0.72;
+  const releaseDrift =
+    flightDirection * hyzerAngle * (distance / 300) * 0.70;
 
   const lateral = aimDrift + turnDrift + fadeDrift + releaseDrift;
   const remaining = Math.round(Math.hypot(300 - downrange, lateral));
@@ -391,7 +393,6 @@ let pixelsPerInch = null;
 let lastCamera1Detection = null;
 let measuredThrowSpeedMph = null;
 let recentThrowSpeeds = [];
-let camera1SpeedTrack = [];
 
 let lastCamera2Detection = null;
 let camera2AimDegrees = null;
@@ -457,7 +458,6 @@ function triggerThrowFromDiscDetection(timestamp) {
 
     lastAutomaticThrowAt = now;
     recentThrowSpeeds = [];
-    camera1SpeedTrack = [];
     lastCamera1Detection = null;
 
     // Directly call the simulator animation.
@@ -596,50 +596,26 @@ function handleSpeedCalibrationClick(event) {
 
 function recordCamera1Speed(sourceX, sourceY, timestamp) {
   if (!pixelsPerInch || speedCalibrationActive || colorPicking) return;
-
-  // Keep a short trajectory instead of estimating from only one pair of frames.
-  camera1SpeedTrack.push({ x: sourceX, y: sourceY, t: timestamp });
-  camera1SpeedTrack = camera1SpeedTrack.filter((p) => timestamp - p.t <= 260).slice(-18);
-
-  if (camera1SpeedTrack.length >= 3) {
-    const newest = camera1SpeedTrack[camera1SpeedTrack.length - 1];
-
-    // Prefer a baseline of roughly 45–180 ms. A longer baseline greatly reduces
-    // webcam pixel jitter and timestamp error compared with frame-to-frame speed.
-    let oldest = null;
-    for (const p of camera1SpeedTrack) {
-      const age = newest.t - p.t;
-      if (age >= 45 && age <= 180) {
-        oldest = p;
-        break;
-      }
-    }
-
-    if (oldest) {
-      const dt = (newest.t - oldest.t) / 1000;
-      const displacementPx = Math.hypot(newest.x - oldest.x, newest.y - oldest.y);
-      const mph = ((displacementPx / pixelsPerInch) / dt) / 17.6;
-
-      if (mph >= 2 && mph <= 100 && displacementPx >= 4) {
+  const current = {x:sourceX, y:sourceY, t:timestamp};
+  if (lastCamera1Detection) {
+    const dt = (timestamp-lastCamera1Detection.t)/1000;
+    const pixels = Math.hypot(sourceX-lastCamera1Detection.x, sourceY-lastCamera1Detection.y);
+    if (dt > .012 && dt < .18) {
+      const mph = ((pixels/pixelsPerInch)/dt)/17.6;
+      if (mph >= 2 && mph <= 100) {
         recentThrowSpeeds.push(mph);
-        recentThrowSpeeds = recentThrowSpeeds.slice(-8);
-
-        // Median of the recent trajectory estimates rejects single bad frames.
-        const sorted = [...recentThrowSpeeds].sort((a, b) => a - b);
-        const mid = Math.floor(sorted.length / 2);
-        const estimate = sorted.length % 2
-          ? sorted[mid]
-          : (sorted[mid - 1] + sorted[mid]) / 2;
-
+        recentThrowSpeeds = recentThrowSpeeds.slice(-6);
+        const sorted = [...recentThrowSpeeds].sort((a,b)=>a-b);
+        const estimate = sorted[Math.max(0, Math.floor(sorted.length*.7))];
         measuredThrowSpeedMph = estimate;
         measuredSpeedOutput.textContent = `${estimate.toFixed(1)} mph`;
         useMeasuredSpeedButton.disabled = false;
-        speedCalibrationStatus.textContent = `Tracked speed: ${estimate.toFixed(1)} mph`;
+        speedCalibrationStatus.textContent = `Speed detected: ${estimate.toFixed(1)} mph. Throw captured — launching…`;
+        /* throw is triggered directly by disc detection */
       }
     }
   }
-
-  lastCamera1Detection = { x: sourceX, y: sourceY, t: timestamp };
+  lastCamera1Detection = current;
 }
 
 startSpeedCalibrationButton.addEventListener("click", beginSpeedCalibration);
@@ -1187,32 +1163,14 @@ function getCameraErrorMessage(error) {
     case "OverconstrainedError":
       return "The selected webcam is unavailable. Choose another camera and try again.";
     default:
-      return `Camera error${error?.name ? ` (${error.name})` : ""}: ${error?.message || "Could not start the webcam."}`;
+      return "A camera could not be started. Check browser permissions and try again.";
   }
 }
 
-async function getCameraStream(deviceId) {
-  const preferred = {
-    width: { ideal: 1280 },
-    height: { ideal: 720 },
-    frameRate: { ideal: 60 }
-  };
-  if (deviceId) preferred.deviceId = { exact: deviceId };
-
-  try {
-    return await cameraMediaDevices.getUserMedia({ audio: false, video: preferred });
-  } catch (firstError) {
-    // Compatibility fallback: let Chrome choose any settings the webcam supports.
-    if (deviceId) {
-      try {
-        return await cameraMediaDevices.getUserMedia({
-          audio: false,
-          video: { deviceId: { exact: deviceId } }
-        });
-      } catch (_) {}
-    }
-    return cameraMediaDevices.getUserMedia({ audio: false, video: true });
-  }
+function getCameraStream(deviceId) {
+  const video = { frameRate: { ideal: 60, min: 30 } };
+  if (deviceId) video.deviceId = { exact: deviceId };
+  return cameraMediaDevices.getUserMedia({ audio: false, video });
 }
 
 function setCameraSlotLive(index, stream) {
@@ -1437,14 +1395,6 @@ async function startCameras() {
   setCameraStatus("Requesting camera permission…");
 
   try {
-    // Chrome may hide camera device IDs until permission has been granted.
-    // If the lists are empty, briefly request a camera first, then rebuild both lists.
-    if (!availableVideoCameras.length) {
-      const permissionStream = await cameraMediaDevices.getUserMedia({ audio: false, video: true });
-      stopMediaStream(permissionStream);
-      await refreshCameraChoices();
-    }
-
     if (!cameraSlots[0].stream) {
       const firstStream = await getCameraStream(cameraSlots[0].select.value);
       if (runToken !== cameraStartToken) {
@@ -1503,7 +1453,7 @@ async function startCameras() {
     const firstFps = cameraSlots[0].state.textContent.replace("LIVE · ", "");
     const secondFps = cameraSlots[1].state.textContent.replace("LIVE · ", "");
     setCameraStatus(
-      `Both camera previews are live (${firstFps} / ${secondFps}). 60 FPS is requested when supported; the app now accepts whatever FPS each webcam can provide.`,
+      `Both camera previews are live (${firstFps} / ${secondFps}). 60 FPS is requested when supported; 30 FPS cameras work too.`,
       "success",
     );
   } catch (error) {

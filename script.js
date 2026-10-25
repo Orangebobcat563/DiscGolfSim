@@ -376,6 +376,30 @@ let lastCamera1Detection = null;
 let measuredThrowSpeedMph = null;
 let recentThrowSpeeds = [];
 
+let autoThrowTimer = null;
+let lastAutomaticThrowAt = -Infinity;
+const AUTO_THROW_COOLDOWN_MS = 2500;
+const AUTO_THROW_SETTLE_MS = 180;
+const AUTO_THROW_MIN_MPH = 12;
+
+function scheduleAutomaticCameraThrow() {
+  if (isThrowing || !Number.isFinite(measuredThrowSpeedMph)) return;
+  if (measuredThrowSpeedMph < AUTO_THROW_MIN_MPH) return;
+  if (performance.now() - lastAutomaticThrowAt < AUTO_THROW_COOLDOWN_MS) return;
+  clearTimeout(autoThrowTimer);
+  autoThrowTimer = setTimeout(() => {
+    if (isThrowing || !Number.isFinite(measuredThrowSpeedMph)) return;
+    controls.speed.value = String(Math.round(Math.max(Number(controls.speed.min), Math.min(Number(controls.speed.max), measuredThrowSpeedMph))));
+    updateLabels();
+    lastAutomaticThrowAt = performance.now();
+    recentThrowSpeeds = [];
+    lastCamera1Detection = null;
+    speedCalibrationStatus.textContent = `Automatic throw: ${controls.speed.value} mph.`;
+    throwDisc();
+  }, AUTO_THROW_SETTLE_MS);
+}
+
+
 const calibrationDistanceInput = document.querySelector("#calibration-distance");
 const startSpeedCalibrationButton = document.querySelector("#start-speed-calibration");
 const useMeasuredSpeedButton = document.querySelector("#use-measured-speed");
@@ -447,7 +471,8 @@ function recordCamera1Speed(sourceX, sourceY, timestamp) {
         measuredThrowSpeedMph = estimate;
         measuredSpeedOutput.textContent = `${estimate.toFixed(1)} mph`;
         useMeasuredSpeedButton.disabled = false;
-        speedCalibrationStatus.textContent = "Speed detected. Click Use measured speed to copy it into the simulator.";
+        speedCalibrationStatus.textContent = `Speed detected: ${estimate.toFixed(1)} mph. Launching automatically…`;
+        scheduleAutomaticCameraThrow();
       }
     }
   }

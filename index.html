@@ -8,7 +8,19 @@
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <link rel="stylesheet" href="./style.css" />
     <script type="module" src="./script.js"></script>
-  </head>
+  
+<style id="camera-only-controls">
+  .throw-controls .control-group:has(#speed),
+  .throw-controls .control-group:has(#aim),
+  .throw-controls .control-group:has(#launch),
+  .throw-controls .control-group:has(#hyzer),
+  .control-group:has(#speed),
+  .control-group:has(#aim),
+  .control-group:has(#launch),
+  .control-group:has(#hyzer) { display: none !important; }
+</style>
+
+</head>
   <body>
     <main class="practice-shell">
       <header class="topbar">
@@ -122,6 +134,14 @@
           </div>
           <p class="calibration-help">Place Camera 2 above or in front of the throwing lane so it can see the disc move through the frame. The first number is left/right aim. Camera 2 also checks how round the disc looks: a round disc is flatter, while a thinner oval means more tilt. It uses that shape plus the oval direction to estimate hyzer or anhyzer.</p>
           <p class="detection-setup-hint" id="camera2-measurement-status" role="status" aria-live="polite">Start Camera 2 and throw through both camera views.</p>
+        </div>
+
+
+        <div class="speed-calibration" id="camera-sim-values">
+          <div class="speed-calibration-heading">
+            <div><p class="eyebrow">CAMERA → SIMULATOR</p><h3>Live throw values</h3></div>
+          </div>
+          <p id="camera-sim-values-text" class="calibration-help">Waiting for a detected throw…</p>
         </div>
 
         <div class="camera-action-row">

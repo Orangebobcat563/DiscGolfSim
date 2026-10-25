@@ -229,8 +229,8 @@ function finishShot(shot, id) {
       ? `Landed ${shot.distance} feet. ${Math.round(shot.downrange - 300)} feet past the basket.`
       : `Landed ${shot.distance} feet. ${remaining} feet to the basket.`,
   );
-  if (throwButton) throwButton.disabled = false;
-  if (throwButton) throwButton.innerHTML = '<span class="throw-icon" aria-hidden="true">➜</span> Throw again';
+  if (throwButton) if (throwButton) throwButton.disabled = false;
+  if (throwButton) if (throwButton) throwButton.innerHTML = '<span class="throw-icon" aria-hidden="true">➜</span> Throw again';
 }
 
 function throwDisc(event) {
@@ -258,8 +258,8 @@ function throwDisc(event) {
   shotResults.hidden = true;
   disc.setAttribute("transform", `translate(${tee.x} ${tee.y})`);
   disc.classList.add("in-flight");
-  if (throwButton) throwButton.disabled = true;
-  if (throwButton) throwButton.textContent = "In flight…";
+  if (throwButton) if (throwButton) throwButton.disabled = true;
+  if (throwButton) if (throwButton) throwButton.textContent = "In flight…";
   announce(`${shot.profile.name} · ${shot.profile.speed} / ${shot.profile.glide} / ${shot.profile.turn} / ${shot.profile.fade} is in the air.`);
 
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -299,8 +299,8 @@ function resetHole() {
   remainingLabel.textContent = "TO THE BASKET";
   flightLive.classList.remove("visible");
   flightLive.textContent = "";
-  if (throwButton) throwButton.disabled = false;
-  if (throwButton) throwButton.innerHTML = '<span class="throw-icon" aria-hidden="true">➜</span> Throw disc';
+  if (throwButton) if (throwButton) throwButton.disabled = false;
+  if (throwButton) if (throwButton) throwButton.innerHTML = '<span class="throw-icon" aria-hidden="true">➜</span> Throw disc';
 }
 
 form.addEventListener("submit", throwDisc);
@@ -402,92 +402,60 @@ function triggerThrowFromDiscDetection(timestamp) {
   if (!Number.isFinite(discDetectionStartedAt) || discDetectionStartedAt < 0) {
     discDetectionStartedAt = timestamp;
   }
-
-  // Reject a one-frame color flash.
   if (timestamp - discDetectionStartedAt < DETECTION_THROW_DELAY_MS) return;
 
   detectionThrowArmed = false;
   clearTimeout(autoThrowTimer);
 
-  // Give Camera 2 a very short window to report aim/roundness before launching.
+  // Short shared capture window: Camera 2 can finish its current measurement.
   autoThrowTimer = setTimeout(() => {
     const now = performance.now();
 
-    if (Number.isFinite(measuredThrowSpeedMph)) {
-      controls.speed.value = String(Math.round(
-        Math.max(Number(controls.speed.min),
-        Math.min(Number(controls.speed.max), measuredThrowSpeedMph))
-      ));
-    }
+    const speedValue = Number.isFinite(measuredThrowSpeedMph)
+      ? Math.max(2, Math.min(75, measuredThrowSpeedMph))
+      : Math.max(2, Number(controls.speed.value) || 25);
 
-    const camera2IsFresh = now - camera2MeasurementAt < 900;
-    if (camera2IsFresh && Number.isFinite(camera2AimDegrees)) {
-      controls.aim.value = String(Math.round(
-        Math.max(Number(controls.aim.min),
-        Math.min(Number(controls.aim.max), camera2AimDegrees))
-      ));
-    }
-    if (camera2IsFresh && Number.isFinite(camera2HyzerDegrees)) {
-      controls.hyzer.value = String(Math.round(
-        Math.max(Number(controls.hyzer.min),
-        Math.min(Number(controls.hyzer.max), camera2HyzerDegrees))
-      ));
-    }
+    const camera2Fresh = now - camera2MeasurementAt < 1500;
+    const aimValue = camera2Fresh && Number.isFinite(camera2AimDegrees)
+      ? Math.max(Number(controls.aim.min), Math.min(Number(controls.aim.max), camera2AimDegrees))
+      : 0;
+    const hyzerValue = camera2Fresh && Number.isFinite(camera2HyzerDegrees)
+      ? Math.max(Number(controls.hyzer.min), Math.min(Number(controls.hyzer.max), camera2HyzerDegrees))
+      : 0;
 
+    // Put camera values into the existing physics inputs before getShot() reads them.
+    controls.speed.value = String(Math.round(speedValue));
+    controls.aim.value = String(Math.round(aimValue));
+    controls.hyzer.value = String(Math.round(hyzerValue));
     updateLabels();
+
+    if (cameraSimValuesText) {
+      const angleName = hyzerValue > 2 ? "hyzer" : hyzerValue < -2 ? "anhyzer" : "flat";
+      cameraSimValuesText.textContent =
+        `${Math.round(speedValue)} mph · aim ${aimValue.toFixed(1)}° · ${angleName} ${Math.abs(hyzerValue).toFixed(1)}°`;
+    }
+    if (speedCalibrationStatus) {
+      speedCalibrationStatus.textContent = "DISC DETECTED — simulator throw started";
+    }
+
     lastAutomaticThrowAt = now;
     recentThrowSpeeds = [];
     lastCamera1Detection = null;
 
-    if (speedCalibrationStatus) {
-      const aimText = camera2IsFresh && Number.isFinite(camera2AimDegrees)
-        ? `${Number(controls.aim.value)}° aim`
-        : "aim unchanged";
-      const hyzerText = camera2IsFresh && Number.isFinite(camera2HyzerDegrees)
-        ? `${Number(controls.hyzer.value)}° hyzer/anhyzer`
-        : "angle unchanged";
-      speedCalibrationStatus.textContent =
-        `DISC DETECTED → ${controls.speed.value} mph · ${aimText} · ${hyzerText} · THROWING`;
+    // Directly call the simulator animation.
+    try {
+      throwDisc();
+    } catch (error) {
+      console.error("Automatic simulator throw failed:", error);
+      if (speedCalibrationStatus) {
+        speedCalibrationStatus.textContent = `Automatic throw error: ${error.message}`;
+      }
     }
-
-    throwDisc();
-  }, 180);
+  }, 220);
 }
-
 function scheduleAutomaticCameraThrow() {
-  if (!Number.isFinite(measuredThrowSpeedMph)) return;
-  if (measuredThrowSpeedMph < AUTO_THROW_MIN_MPH) return;
-  if (performance.now() - lastAutomaticThrowAt < AUTO_THROW_COOLDOWN_MS) return;
-  clearTimeout(autoThrowTimer);
-  autoThrowTimer = setTimeout(() => {
-    if (!Number.isFinite(measuredThrowSpeedMph)) return;
-    controls.speed.value = String(Math.round(Math.max(Number(controls.speed.min), Math.min(Number(controls.speed.max), measuredThrowSpeedMph))));
-    const camera2IsFresh = performance.now() - camera2MeasurementAt < 1200;
-    if (camera2IsFresh && Number.isFinite(camera2AimDegrees)) {
-      controls.aim.value = String(Math.round(Math.max(Number(controls.aim.min), Math.min(Number(controls.aim.max), camera2AimDegrees))));
-    }
-    if (camera2IsFresh && Number.isFinite(camera2HyzerDegrees)) {
-      controls.hyzer.value = String(Math.round(Math.max(Number(controls.hyzer.min), Math.min(Number(controls.hyzer.max), camera2HyzerDegrees))));
-    }
-    updateLabels();
-    lastAutomaticThrowAt = performance.now();
-    recentThrowSpeeds = [];
-    lastCamera1Detection = null;
-    speedCalibrationStatus.textContent = `AUTO THROW: ${controls.speed.value} mph · launching simulator now`;
-    throwDisc();
-  }, AUTO_THROW_SETTLE_MS);
+  // Camera-only mode: disc detection is the trigger.
 }
-
-
-const calibrationDistanceInput = document.querySelector("#calibration-distance");
-const startSpeedCalibrationButton = document.querySelector("#start-speed-calibration");
-const useMeasuredSpeedButton = document.querySelector("#use-measured-speed");
-const speedCalibrationStatus = document.querySelector("#speed-calibration-status");
-const measuredSpeedOutput = document.querySelector("#measured-speed");
-const camera2AimOutput = document.querySelector("#camera2-aim-output");
-const camera2HyzerOutput = document.querySelector("#camera2-hyzer-output");
-const camera2RoundnessOutput = document.querySelector("#camera2-roundness-output");
-const camera2MeasurementStatus = document.querySelector("#camera2-measurement-status");
 
 function recordCamera2Throw(sourceX, sourceY, timestamp, region) {
   camera2LastSeenAt = timestamp;
@@ -540,6 +508,20 @@ function recordCamera2Throw(sourceX, sourceY, timestamp, region) {
         Number.isFinite(camera2Roundness) ? `${Math.round(camera2Roundness * 100)}% round` : "—";
       if (camera2MeasurementStatus) camera2MeasurementStatus.textContent =
         "Camera 2 captured the release line. It will be used on the automatic throw.";
+      // Feed Camera 2 directly into simulator physics as soon as a valid measurement exists.
+      if (Number.isFinite(camera2AimDegrees)) {
+        controls.aim.value = String(Math.round(Math.max(Number(controls.aim.min), Math.min(Number(controls.aim.max), camera2AimDegrees))));
+      }
+      if (Number.isFinite(camera2HyzerDegrees)) {
+        controls.hyzer.value = String(Math.round(Math.max(Number(controls.hyzer.min), Math.min(Number(controls.hyzer.max), camera2HyzerDegrees))));
+      }
+      updateLabels();
+      if (cameraSimValuesText) {
+        const liveHyzer = Number(controls.hyzer.value);
+        const liveName = liveHyzer > 2 ? "hyzer" : liveHyzer < -2 ? "anhyzer" : "flat";
+        cameraSimValuesText.textContent =
+          `${controls.speed.value} mph · aim ${Number(controls.aim.value).toFixed(1)}° · ${liveName} ${Math.abs(liveHyzer).toFixed(1)}°`;
+      }
     }
   }
   lastCamera2Detection = current;

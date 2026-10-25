@@ -363,11 +363,106 @@ const PROCESS_WIDTH = 320;
 const PROCESS_HEIGHT = 180;
 const MIN_DETECTION_PIXELS = 12;
 const MAX_DETECTION_FRACTION = 0.28;
-const DETECTION_INTERVAL_MS = 83;
+const DETECTION_INTERVAL_MS = 33;
 let selectedDiscColor = null;
 let colorPicking = false;
 let detectionAnimationFrame = 0;
 let lastDetectionAt = -Infinity;
+
+let speedCalibrationActive = false;
+let speedCalibrationPoints = [];
+let pixelsPerInch = null;
+let lastCamera1Detection = null;
+let measuredThrowSpeedMph = null;
+let recentThrowSpeeds = [];
+
+const calibrationDistanceInput = document.querySelector("#calibration-distance");
+const startSpeedCalibrationButton = document.querySelector("#start-speed-calibration");
+const useMeasuredSpeedButton = document.querySelector("#use-measured-speed");
+const speedCalibrationStatus = document.querySelector("#speed-calibration-status");
+const measuredSpeedOutput = document.querySelector("#measured-speed");
+
+function updateCalibrationButtonState() {
+  const camera1Running = Boolean(cameraSlots[0].stream);
+  startSpeedCalibrationButton.disabled = !camera1Running;
+  if (!camera1Running) speedCalibrationStatus.textContent = "Start Camera 1 first.";
+  else if (!pixelsPerInch && !speedCalibrationActive) speedCalibrationStatus.textContent = "Ready. Click Calibrate Camera 1, then click two marks in the Camera 1 preview.";
+}
+
+function videoClickToSourcePoint(event, slot) {
+  const crop = getVideoSourceCrop(slot);
+  if (!crop) return null;
+  const rect = slot.video.getBoundingClientRect();
+  const nx = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+  const ny = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+  return { x: crop.x + nx * crop.width, y: crop.y + ny * crop.height };
+}
+
+function beginSpeedCalibration() {
+  if (!cameraSlots[0].stream) return;
+  speedCalibrationActive = true;
+  speedCalibrationPoints = [];
+  lastCamera1Detection = null;
+  recentThrowSpeeds = [];
+  speedCalibrationStatus.textContent = "Calibration: click the FIRST marker in Camera 1.";
+  cameraSlots[0].preview.classList.add("is-color-picking");
+}
+
+function handleSpeedCalibrationClick(event) {
+  if (!speedCalibrationActive) return;
+  const point = videoClickToSourcePoint(event, cameraSlots[0]);
+  if (!point) return;
+  speedCalibrationPoints.push(point);
+  if (speedCalibrationPoints.length === 1) {
+    speedCalibrationStatus.textContent = "Good. Now click the SECOND marker in Camera 1.";
+    return;
+  }
+  const a = speedCalibrationPoints[0], b = speedCalibrationPoints[1];
+  const pixelDistance = Math.hypot(b.x-a.x, b.y-a.y);
+  const realDistanceInches = clampNumber(calibrationDistanceInput.value, 6, 120, 36);
+  if (pixelDistance < 20) {
+    speedCalibrationPoints = [];
+    speedCalibrationStatus.textContent = "Those clicks were too close. Click the first marker again.";
+    return;
+  }
+  pixelsPerInch = pixelDistance / realDistanceInches;
+  speedCalibrationActive = false;
+  cameraSlots[0].preview.classList.remove("is-color-picking");
+  speedCalibrationStatus.textContent = `Calibrated: ${pixelDistance.toFixed(0)} px = ${realDistanceInches} in. Throw the disc through Camera 1's view.`;
+}
+
+function recordCamera1Speed(sourceX, sourceY, timestamp) {
+  if (!pixelsPerInch || speedCalibrationActive || colorPicking) return;
+  const current = {x:sourceX, y:sourceY, t:timestamp};
+  if (lastCamera1Detection) {
+    const dt = (timestamp-lastCamera1Detection.t)/1000;
+    const pixels = Math.hypot(sourceX-lastCamera1Detection.x, sourceY-lastCamera1Detection.y);
+    if (dt > .012 && dt < .18) {
+      const mph = ((pixels/pixelsPerInch)/dt)/17.6;
+      if (mph >= 8 && mph <= 100) {
+        recentThrowSpeeds.push(mph);
+        recentThrowSpeeds = recentThrowSpeeds.slice(-6);
+        const sorted = [...recentThrowSpeeds].sort((a,b)=>a-b);
+        const estimate = sorted[Math.max(0, Math.floor(sorted.length*.7))];
+        measuredThrowSpeedMph = estimate;
+        measuredSpeedOutput.textContent = `${estimate.toFixed(1)} mph`;
+        useMeasuredSpeedButton.disabled = false;
+        speedCalibrationStatus.textContent = "Speed detected. Click Use measured speed to copy it into the simulator.";
+      }
+    }
+  }
+  lastCamera1Detection = current;
+}
+
+startSpeedCalibrationButton.addEventListener("click", beginSpeedCalibration);
+cameraSlots[0].video.addEventListener("click", handleSpeedCalibrationClick);
+useMeasuredSpeedButton.addEventListener("click", () => {
+  if (!Number.isFinite(measuredThrowSpeedMph)) return;
+  controls.speed.value = String(Math.round(Math.max(Number(controls.speed.min), Math.min(Number(controls.speed.max), measuredThrowSpeedMph))));
+  updateLabels();
+  speedCalibrationStatus.textContent = `Using ${controls.speed.value} mph for the next simulated throw.`;
+});
+
 
 cameraSlots.forEach((slot) => {
   slot.overlayContext = slot.overlay.getContext("2d");
@@ -612,6 +707,7 @@ function processCameraDetection(slot) {
     const frame = slot.processingContext.getImageData(0, 0, PROCESS_WIDTH, PROCESS_HEIGHT);
     const region = findLargestColorRegion(slot, frame);
     if (!region) {
+      if (slot === cameraSlots[0]) lastCamera1Detection = null;
       setDetectionReadout(slot, "NO DISC", "no-disc");
       clearDetectionOverlay(slot);
       return;
@@ -621,6 +717,7 @@ function processCameraDetection(slot) {
     const normalizedY = (region.minY + region.maxY + 1) / (2 * PROCESS_HEIGHT);
     const sourceX = Math.round(crop.x + normalizedX * crop.width);
     const sourceY = Math.round(crop.y + normalizedY * crop.height);
+    if (slot === cameraSlots[0]) recordCamera1Speed(sourceX, sourceY, performance.now());
     setDetectionReadout(
       slot,
       "DISC DETECTED",
@@ -854,6 +951,7 @@ function updateCameraButtons() {
   cameraSlots.forEach((slot) => {
     slot.select.disabled = !cameraApiAvailable || cameraStarting;
   });
+  updateCalibrationButtonState();
 }
 
 function getCameraErrorMessage(error) {

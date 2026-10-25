@@ -100,6 +100,21 @@
           <p class="detection-setup-hint" id="detection-setup-hint" role="status" aria-live="polite">Start both cameras, select a color, then click the disc in the Camera 1 preview.</p>
         </div>
 
+
+        <div class="speed-calibration" aria-labelledby="speed-calibration-title">
+          <div class="speed-calibration-heading">
+            <div><p class="eyebrow">CAMERA 1 MEASUREMENT</p><h3 id="speed-calibration-title">Calibrate throw speed</h3></div>
+            <output class="measured-speed" id="measured-speed">— mph</output>
+          </div>
+          <p class="calibration-help">Put two visible marks in Camera 1's view, measure the real distance between them, then click the two marks in the preview.</p>
+          <div class="calibration-row">
+            <label>Marker distance <span><input id="calibration-distance" type="number" min="6" max="120" step="0.5" value="36"> inches</span></label>
+            <button class="color-select-button" id="start-speed-calibration" type="button" disabled>Calibrate Camera 1</button>
+            <button class="color-select-button" id="use-measured-speed" type="button" disabled>Use measured speed</button>
+          </div>
+          <p class="detection-setup-hint" id="speed-calibration-status" role="status" aria-live="polite">Start Camera 1 first.</p>
+        </div>
+
         <div class="camera-action-row">
           <div class="camera-actions">
             <button class="camera-start-button" id="start-cameras" type="button">Start Cameras</button>

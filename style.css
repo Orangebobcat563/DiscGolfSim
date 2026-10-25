@@ -271,3 +271,20 @@ input[type="range"]:focus-visible { outline: 3px solid #dfaa73; outline-offset: 
   .disc-fields label:first-child, .disc-fields label:last-child { grid-column: 1 / -1; }
   .saved-disc-label { min-width: 0; width: 100%; }
 }
+
+/* Camera 1 real-speed calibration */
+.speed-calibration { margin-top:14px; padding:14px; border:1px solid #e0e5d9; border-radius:9px; background:rgba(247,248,241,.72); }
+.speed-calibration-heading { display:flex; align-items:end; justify-content:space-between; gap:14px; }
+.speed-calibration-heading .eyebrow { margin-bottom:4px; }
+.speed-calibration-heading h3 { margin:0; color:#526354; font-size:15px; }
+.measured-speed { color:var(--moss-deep); font:600 18px var(--mono); white-space:nowrap; }
+.calibration-help { margin:9px 0 12px; color:#7d887d; font-size:10px; line-height:1.45; }
+.calibration-row { display:flex; align-items:end; flex-wrap:wrap; gap:10px; }
+.calibration-row label { display:grid; gap:5px; color:#526354; font-size:9px; font-weight:700; }
+.calibration-row label span { display:flex; align-items:center; gap:6px; font-weight:400; }
+.calibration-row input { width:82px; min-height:36px; padding:0 8px; border:1px solid #d8dfd1; border-radius:6px; background:#fcfcf7; }
+@media (max-width:480px) {
+ .speed-calibration-heading { align-items:flex-start; flex-direction:column; }
+ .calibration-row { align-items:stretch; flex-direction:column; }
+ .calibration-row button { width:100%; }
+}

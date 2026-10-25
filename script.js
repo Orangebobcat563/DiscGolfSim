@@ -229,8 +229,8 @@ function finishShot(shot, id) {
       ? `Landed ${shot.distance} feet. ${Math.round(shot.downrange - 300)} feet past the basket.`
       : `Landed ${shot.distance} feet. ${remaining} feet to the basket.`,
   );
-  throwButton.disabled = false;
-  throwButton.innerHTML = '<span class="throw-icon" aria-hidden="true">➜</span> Throw again';
+  if (throwButton) throwButton.disabled = false;
+  if (throwButton) throwButton.innerHTML = '<span class="throw-icon" aria-hidden="true">➜</span> Throw again';
 }
 
 function throwDisc(event) {
@@ -258,8 +258,8 @@ function throwDisc(event) {
   shotResults.hidden = true;
   disc.setAttribute("transform", `translate(${tee.x} ${tee.y})`);
   disc.classList.add("in-flight");
-  throwButton.disabled = true;
-  throwButton.textContent = "In flight…";
+  if (throwButton) throwButton.disabled = true;
+  if (throwButton) throwButton.textContent = "In flight…";
   announce(`${shot.profile.name} · ${shot.profile.speed} / ${shot.profile.glide} / ${shot.profile.turn} / ${shot.profile.fade} is in the air.`);
 
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -299,8 +299,8 @@ function resetHole() {
   remainingLabel.textContent = "TO THE BASKET";
   flightLive.classList.remove("visible");
   flightLive.textContent = "";
-  throwButton.disabled = false;
-  throwButton.innerHTML = '<span class="throw-icon" aria-hidden="true">➜</span> Throw disc';
+  if (throwButton) throwButton.disabled = false;
+  if (throwButton) throwButton.innerHTML = '<span class="throw-icon" aria-hidden="true">➜</span> Throw disc';
 }
 
 form.addEventListener("submit", throwDisc);
@@ -403,39 +403,55 @@ function triggerThrowFromDiscDetection(timestamp) {
     discDetectionStartedAt = timestamp;
   }
 
-  // A tiny delay filters a one-frame color glitch, but does not wait for speed.
+  // Reject a one-frame color flash.
   if (timestamp - discDetectionStartedAt < DETECTION_THROW_DELAY_MS) return;
 
   detectionThrowArmed = false;
-  lastAutomaticThrowAt = timestamp;
+  clearTimeout(autoThrowTimer);
 
-  // Use measured speed if available; otherwise keep the current simulator speed.
-  if (Number.isFinite(measuredThrowSpeedMph)) {
-    controls.speed.value = String(Math.round(
-      Math.max(Number(controls.speed.min),
-      Math.min(Number(controls.speed.max), measuredThrowSpeedMph))
-    ));
-  }
+  // Give Camera 2 a very short window to report aim/roundness before launching.
+  autoThrowTimer = setTimeout(() => {
+    const now = performance.now();
 
-  const camera2IsFresh = performance.now() - camera2MeasurementAt < 1200;
-  if (camera2IsFresh && Number.isFinite(camera2AimDegrees)) {
-    controls.aim.value = String(Math.round(
-      Math.max(Number(controls.aim.min),
-      Math.min(Number(controls.aim.max), camera2AimDegrees))
-    ));
-  }
-  if (camera2IsFresh && Number.isFinite(camera2HyzerDegrees)) {
-    controls.hyzer.value = String(Math.round(
-      Math.max(Number(controls.hyzer.min),
-      Math.min(Number(controls.hyzer.max), camera2HyzerDegrees))
-    ));
-  }
+    if (Number.isFinite(measuredThrowSpeedMph)) {
+      controls.speed.value = String(Math.round(
+        Math.max(Number(controls.speed.min),
+        Math.min(Number(controls.speed.max), measuredThrowSpeedMph))
+      ));
+    }
 
-  updateLabels();
-  if (speedCalibrationStatus) {
-    speedCalibrationStatus.textContent = "DISC DETECTED — throwing simulator disc now";
-  }
-  throwDisc();
+    const camera2IsFresh = now - camera2MeasurementAt < 900;
+    if (camera2IsFresh && Number.isFinite(camera2AimDegrees)) {
+      controls.aim.value = String(Math.round(
+        Math.max(Number(controls.aim.min),
+        Math.min(Number(controls.aim.max), camera2AimDegrees))
+      ));
+    }
+    if (camera2IsFresh && Number.isFinite(camera2HyzerDegrees)) {
+      controls.hyzer.value = String(Math.round(
+        Math.max(Number(controls.hyzer.min),
+        Math.min(Number(controls.hyzer.max), camera2HyzerDegrees))
+      ));
+    }
+
+    updateLabels();
+    lastAutomaticThrowAt = now;
+    recentThrowSpeeds = [];
+    lastCamera1Detection = null;
+
+    if (speedCalibrationStatus) {
+      const aimText = camera2IsFresh && Number.isFinite(camera2AimDegrees)
+        ? `${Number(controls.aim.value)}° aim`
+        : "aim unchanged";
+      const hyzerText = camera2IsFresh && Number.isFinite(camera2HyzerDegrees)
+        ? `${Number(controls.hyzer.value)}° hyzer/anhyzer`
+        : "angle unchanged";
+      speedCalibrationStatus.textContent =
+        `DISC DETECTED → ${controls.speed.value} mph · ${aimText} · ${hyzerText} · THROWING`;
+    }
+
+    throwDisc();
+  }, 180);
 }
 
 function scheduleAutomaticCameraThrow() {
@@ -889,7 +905,13 @@ function processCameraDetection(slot) {
       recordCamera1Speed(sourceX, sourceY, detectionTime);
       triggerThrowFromDiscDetection(detectionTime);
     }
-    if (slot === cameraSlots[1]) recordCamera2Throw(sourceX, sourceY, detectionTime, region);
+    if (slot === cameraSlots[1]) {
+      recordCamera2Throw(sourceX, sourceY, detectionTime, region);
+      // Camera 1 remains the main trigger, but Camera 2 can begin the shared capture window.
+      if (!Number.isFinite(discDetectionStartedAt) || discDetectionStartedAt < 0) {
+        discDetectionStartedAt = detectionTime;
+      }
+    }
     setDetectionReadout(
       slot,
       "DISC DETECTED",

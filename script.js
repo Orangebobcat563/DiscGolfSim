@@ -1187,14 +1187,32 @@ function getCameraErrorMessage(error) {
     case "OverconstrainedError":
       return "The selected webcam is unavailable. Choose another camera and try again.";
     default:
-      return "A camera could not be started. Check browser permissions and try again.";
+      return `Camera error${error?.name ? ` (${error.name})` : ""}: ${error?.message || "Could not start the webcam."}`;
   }
 }
 
-function getCameraStream(deviceId) {
-  const video = { frameRate: { ideal: 60, min: 30 } };
-  if (deviceId) video.deviceId = { exact: deviceId };
-  return cameraMediaDevices.getUserMedia({ audio: false, video });
+async function getCameraStream(deviceId) {
+  const preferred = {
+    width: { ideal: 1280 },
+    height: { ideal: 720 },
+    frameRate: { ideal: 60 }
+  };
+  if (deviceId) preferred.deviceId = { exact: deviceId };
+
+  try {
+    return await cameraMediaDevices.getUserMedia({ audio: false, video: preferred });
+  } catch (firstError) {
+    // Compatibility fallback: let Chrome choose any settings the webcam supports.
+    if (deviceId) {
+      try {
+        return await cameraMediaDevices.getUserMedia({
+          audio: false,
+          video: { deviceId: { exact: deviceId } }
+        });
+      } catch (_) {}
+    }
+    return cameraMediaDevices.getUserMedia({ audio: false, video: true });
+  }
 }
 
 function setCameraSlotLive(index, stream) {
@@ -1419,6 +1437,14 @@ async function startCameras() {
   setCameraStatus("Requesting camera permission…");
 
   try {
+    // Chrome may hide camera device IDs until permission has been granted.
+    // If the lists are empty, briefly request a camera first, then rebuild both lists.
+    if (!availableVideoCameras.length) {
+      const permissionStream = await cameraMediaDevices.getUserMedia({ audio: false, video: true });
+      stopMediaStream(permissionStream);
+      await refreshCameraChoices();
+    }
+
     if (!cameraSlots[0].stream) {
       const firstStream = await getCameraStream(cameraSlots[0].select.value);
       if (runToken !== cameraStartToken) {
@@ -1477,7 +1503,7 @@ async function startCameras() {
     const firstFps = cameraSlots[0].state.textContent.replace("LIVE · ", "");
     const secondFps = cameraSlots[1].state.textContent.replace("LIVE · ", "");
     setCameraStatus(
-      `Both camera previews are live (${firstFps} / ${secondFps}). 60 FPS is requested when supported; 30 FPS cameras work too.`,
+      `Both camera previews are live (${firstFps} / ${secondFps}). 60 FPS is requested when supported; the app now accepts whatever FPS each webcam can provide.`,
       "success",
     );
   } catch (error) {

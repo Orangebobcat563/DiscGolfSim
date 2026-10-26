@@ -150,89 +150,30 @@ function getShot() {
   const hyzerAngle = Number(controls.hyzer.value);
   const aimRadians = (aimAngle * Math.PI) / 180;
   const profile = getDiscProfile();
-  const flightDirection = getFlightDirection(profile.style);
 
-  // Flight numbers describe how the disc behaves; they do not directly
-  // give it free distance. Release speed is still the main source of range.
-  //
-  // SPEED: higher speed numbers require a faster release before the disc
-  // reaches its intended high-speed turn.
-  const designedMph = 20 + profile.speed * 3.25;
-  const powerRatio = speed / designedMph;
+  // Flight numbers influence the model, while actual release speed still matters most.
+  // A high-speed disc needs more release speed to reach its designed turn/glide.
+  const requiredMph = 25 + profile.speed * 2.8;
+  const speedActivation = Math.max(0.35, Math.min(1.15, speed / requiredMph));
+  const launchEfficiency = Math.max(0.72, 1 - Math.pow((launchAngle - 10) / 26, 2) * 0.13);
+  const releaseAngleEfficiency = Math.max(0.78, 1 - Math.abs(hyzerAngle) * 0.0015);
+  const glideMultiplier = 0.82 + profile.glide * 0.055;
+  const speedClassEfficiency = 1 - Math.max(0, profile.speed - speed / 4.6) * 0.012;
 
-  // TURN: progressively activates as the disc gets up to its designed speed.
-  // Negative turn moves opposite the disc's eventual fade.
-  const turnActivation = Math.max(0, Math.min(1.15, (powerRatio - 0.48) / 0.52));
-
-  // GLIDE: changes carry/air time, but only within a realistic-sized range.
-  const glideCarry = 0.78 + profile.glide * 0.055;
-
-  // Launch around 8–12 degrees is efficient for this simplified simulator.
-  const launchEfficiency = Math.max(
-    0.58,
-    1 - Math.pow((launchAngle - 10) / 25, 2) * 0.22
+  const distance = Math.round(
+    Math.max(20, speed * 5.05 * launchEfficiency * releaseAngleEfficiency * glideMultiplier * speedClassEfficiency),
   );
-
-  // Large release tilt costs some forward distance.
-  const tiltEfficiency = Math.max(0.72, 1 - Math.abs(hyzerAngle) * 0.006);
-
-  // An underpowered high-speed driver should not automatically fly farther
-  // just because it has a larger Speed number.
-  const speedMismatch = Math.max(0, profile.speed - speed / 4.4);
-  const powerEfficiency = Math.max(0.60, 1 - speedMismatch * 0.027);
-
-  const distance = Math.round(Math.max(
-    4,
-    speed *
-      4.75 *
-      glideCarry *
-      launchEfficiency *
-      tiltEfficiency *
-      powerEfficiency
-  ));
-
   const downrange = distance * Math.cos(aimRadians);
   const aimDrift = distance * Math.sin(aimRadians);
 
-  // Camera/UI convention: negative = hyzer, positive = anhyzer.
-  // Hyzer suppresses turn; anhyzer allows/exposes more turn.
-  const releaseTurnFactor = Math.max(
-    0.30,
-    Math.min(1.55, 1 + hyzerAngle / 35)
-  );
-
-  const listedTurn = Math.max(0, -profile.turn);
-  const turnStrength = listedTurn * turnActivation * releaseTurnFactor;
-  const turnDrift =
-    -flightDirection *
-    turnStrength *
-    (distance / 300) *
-    22;
-
-  // FADE: stronger as the disc loses speed. Underpowered discs enter their
-  // low-speed fade sooner, while well-powered discs hold their line longer.
-  const underpowered = Math.max(0, Math.min(1, 1 - powerRatio));
-  const fadeActivation =
-    0.58 +
-    underpowered * 1.05 +
-    Math.max(0, 0.72 - turnActivation) * 0.28;
-
-  const fadeDrift =
-    flightDirection *
-    profile.fade *
-    fadeActivation *
-    (distance / 300) *
-    18;
-
-  // Release angle itself also bends the initial line. Because the existing
-  // simulator stores hyzer as negative and anhyzer as positive, preserve that
-  // convention here.
-  const releaseDrift =
-    -flightDirection *
-    hyzerAngle *
-    (distance / 300) *
-    0.75;
-
+  const flightDirection = getFlightDirection(profile.style);
+  // Negative turn moves opposite the eventual fade during the high-speed part of flight.
+  const turnDrift = (-profile.turn) * speedActivation * (distance / 300) * 14 * -flightDirection;
+  // Fade becomes stronger late in flight, especially if the disc was not fully up to speed.
+  const fadeActivation = 0.72 + Math.max(0, 1 - speedActivation) * 0.65;
+  const fadeDrift = profile.fade * fadeActivation * (distance / 300) * 13 * flightDirection;
+  // Release hyzer/anhyzer is still controlled by the throw itself.
+  const releaseDrift = hyzerAngle * (distance / 300) * 1.25;
   const lateral = aimDrift + turnDrift + fadeDrift + releaseDrift;
   const remaining = Math.round(Math.hypot(300 - downrange, lateral));
 

@@ -151,28 +151,79 @@ function getShot() {
   const aimRadians = (aimAngle * Math.PI) / 180;
   const profile = getDiscProfile();
 
-  // Flight numbers influence the model, while actual release speed still matters most.
-  // A high-speed disc needs more release speed to reach its designed turn/glide.
-  const requiredMph = 25 + profile.speed * 2.8;
-  const speedActivation = Math.max(0.35, Math.min(1.15, speed / requiredMph));
-  const launchEfficiency = Math.max(0.72, 1 - Math.pow((launchAngle - 10) / 26, 2) * 0.13);
-  const releaseAngleEfficiency = Math.max(0.78, 1 - Math.abs(hyzerAngle) * 0.0015);
-  const glideMultiplier = 0.82 + profile.glide * 0.055;
-  const speedClassEfficiency = 1 - Math.max(0, profile.speed - speed / 4.6) * 0.012;
+  /*
+   * Distance model:
+   * - Release mph is still the biggest factor.
+   * - Disc Speed is a power requirement, not free distance.
+   * - Glide adds carry once the disc has enough speed.
+   * - Turn can add a little usable carry when activated at high speed.
+   * - Fade costs a little distance as the disc slows and finishes.
+   */
+  const requiredMph = 24 + profile.speed * 2.7;
+  const speedActivation = Math.max(0.25, Math.min(1.12, speed / requiredMph));
 
-  const distance = Math.round(
-    Math.max(20, speed * 5.05 * launchEfficiency * releaseAngleEfficiency * glideMultiplier * speedClassEfficiency),
+  const launchEfficiency = Math.max(
+    0.68,
+    1 - Math.pow((launchAngle - 11) / 24, 2) * 0.16,
   );
+  const releaseAngleEfficiency = Math.max(
+    0.76,
+    1 - Math.abs(hyzerAngle) * 0.0022,
+  );
+
+  // Faster discs only earn their extra potential when thrown fast enough.
+  const discSpeedPotential = 0.94 + Math.min(profile.speed, 12) * 0.008;
+  const underSpeedPenalty =
+    1 - Math.max(0, 0.92 - speedActivation) * (0.18 + profile.speed * 0.008);
+
+  // Glide 1–7 changes carry by about -12% to +12% around a glide-4 disc.
+  const glideCarry = 1 + (profile.glide - 4) * 0.04 * Math.min(1, speedActivation + 0.15);
+
+  // High-speed turn can hold the disc in the air slightly longer.
+  const turnCarry =
+    1 + Math.max(0, -profile.turn) * 0.009 * Math.min(1, speedActivation);
+
+  // Strong fade dumps some forward distance late in the flight.
+  const fadeCost =
+    1 - profile.fade * 0.012 * (0.75 + Math.max(0, 1 - speedActivation) * 0.5);
+
+  // Base mph-to-distance curve. It is intentionally sub-linear at higher speeds.
+  const baseDistance = 4.35 * speed + 0.0105 * speed * speed;
+
+  const distance = Math.round(Math.max(
+    20,
+    baseDistance *
+      launchEfficiency *
+      releaseAngleEfficiency *
+      discSpeedPotential *
+      underSpeedPenalty *
+      glideCarry *
+      turnCarry *
+      fadeCost,
+  ));
+
   const downrange = distance * Math.cos(aimRadians);
   const aimDrift = distance * Math.sin(aimRadians);
 
   const flightDirection = getFlightDirection(profile.style);
-  // Negative turn moves opposite the eventual fade during the high-speed part of flight.
-  const turnDrift = (-profile.turn) * speedActivation * (distance / 300) * 14 * -flightDirection;
-  // Fade becomes stronger late in flight, especially if the disc was not fully up to speed.
-  const fadeActivation = 0.72 + Math.max(0, 1 - speedActivation) * 0.65;
-  const fadeDrift = profile.fade * fadeActivation * (distance / 300) * 13 * flightDirection;
-  // Release hyzer/anhyzer is still controlled by the throw itself.
+
+  // Turn is strongest while the disc is moving fast.
+  const turnDrift =
+    (-profile.turn) *
+    Math.pow(speedActivation, 1.35) *
+    (distance / 300) *
+    15 *
+    -flightDirection;
+
+  // Fade is strongest as the disc slows down.
+  const fadeActivation = 0.72 + Math.max(0, 1 - speedActivation) * 0.8;
+  const fadeDrift =
+    profile.fade *
+    fadeActivation *
+    (distance / 300) *
+    13 *
+    flightDirection;
+
   const releaseDrift = hyzerAngle * (distance / 300) * 1.25;
   const lateral = aimDrift + turnDrift + fadeDrift + releaseDrift;
   const remaining = Math.round(Math.hypot(300 - downrange, lateral));
@@ -603,25 +654,47 @@ function handleSpeedCalibrationClick(event) {
 
 function recordCamera1Speed(sourceX, sourceY, timestamp) {
   if (!pixelsPerInch || speedCalibrationActive || colorPicking) return;
-  const current = {x:sourceX, y:sourceY, t:timestamp};
+
+  const current = { x: sourceX, y: sourceY, t: timestamp };
+
   if (lastCamera1Detection) {
-    const dt = (timestamp-lastCamera1Detection.t)/1000;
-    const pixels = Math.hypot(sourceX-lastCamera1Detection.x, sourceY-lastCamera1Detection.y);
-    if (dt > .012 && dt < .18) {
-      const mph = ((pixels/pixelsPerInch)/dt)/17.6;
-      if (mph >= 2 && mph <= 100) {
+    const dt = (timestamp - lastCamera1Detection.t) / 1000;
+    const pixels = Math.hypot(
+      sourceX - lastCamera1Detection.x,
+      sourceY - lastCamera1Detection.y,
+    );
+
+    // Very short gaps are noisy and long gaps usually mean the detector lost the disc.
+    if (dt >= 0.014 && dt <= 0.12 && pixels >= 2) {
+      const mph = ((pixels / pixelsPerInch) / dt) / 17.6;
+
+      if (mph >= 2 && mph <= 90) {
+        // Keep more samples than before, then use a trimmed median instead of
+        // choosing a high percentile. This rejects one-frame tracking jumps.
         recentThrowSpeeds.push(mph);
-        recentThrowSpeeds = recentThrowSpeeds.slice(-6);
-        const sorted = [...recentThrowSpeeds].sort((a,b)=>a-b);
-        const estimate = sorted[Math.max(0, Math.floor(sorted.length*.7))];
+        recentThrowSpeeds = recentThrowSpeeds.slice(-10);
+
+        const sorted = [...recentThrowSpeeds].sort((a, b) => a - b);
+        let usable = sorted;
+        if (sorted.length >= 5) {
+          usable = sorted.slice(1, -1);
+        }
+
+        const middle = Math.floor(usable.length / 2);
+        const estimate = usable.length % 2
+          ? usable[middle]
+          : (usable[middle - 1] + usable[middle]) / 2;
+
         measuredThrowSpeedMph = estimate;
         measuredSpeedOutput.textContent = `${estimate.toFixed(1)} mph`;
         useMeasuredSpeedButton.disabled = false;
-        speedCalibrationStatus.textContent = `Speed detected: ${estimate.toFixed(1)} mph. Throw captured — launching…`;
+        speedCalibrationStatus.textContent =
+          `Speed detected: ${estimate.toFixed(1)} mph. Throw captured — launching…`;
         /* throw is triggered directly by disc detection */
       }
     }
   }
+
   lastCamera1Detection = current;
 }
 

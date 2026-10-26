@@ -9,10 +9,105 @@ const shotResults = document.querySelector("#shot-results");
 const resultDistance = document.querySelector("#result-distance");
 const resultRemaining = document.querySelector("#result-remaining");
 const remainingLabel = document.querySelector("#remaining-label");
+
 const tee = { x: 600, y: 416 };
 const basket = { x: 603, y: 216 };
 let animationFrame = 0;
 let shotId = 0;
+
+const HOLES = [
+  { number: 1, name: "Opening Lane", distance: 300, par: 3, note: "Straight, with a little room to shape it." },
+  { number: 2, name: "Pine Gap", distance: 245, par: 3, note: "Short and technical. Keep the line controlled." },
+  { number: 3, name: "Long Meadow", distance: 410, par: 4, note: "Open distance hole. Placement matters on the second shot." },
+  { number: 4, name: "Left Bend", distance: 330, par: 3, note: "The fairway favors a controlled finish to the left." },
+  { number: 5, name: "Creek Run", distance: 285, par: 3, note: "A narrow landing zone rewards accuracy." },
+  { number: 6, name: "Big Drive", distance: 475, par: 4, note: "The longest hole. Get distance, then attack the basket." },
+  { number: 7, name: "Right Window", distance: 315, par: 3, note: "Shape the flight through the right-side window." },
+  { number: 8, name: "Uphill Finish", distance: 360, par: 4, note: "A longer approach makes disc choice important." },
+  { number: 9, name: "Home Stretch", distance: 390, par: 4, note: "One last controlled drive before the finish." },
+];
+
+let currentHoleIndex = 0;
+let currentLie = { lateral: 0, downrange: 0 };
+let strokesThisHole = 0;
+let holeScores = Array(HOLES.length).fill(null);
+let holeComplete = false;
+
+const holeChip = document.querySelector("#hole-chip");
+const holeNameText = document.querySelector("#hole-name");
+const holeMetaText = document.querySelector("#hole-meta");
+const distanceNumber = document.querySelector("#hole-distance-number");
+const teeLabel = document.querySelector("#tee-label");
+const basketDistanceText = document.querySelector("#basket-distance-text");
+const sceneCaption = document.querySelector("#scene-caption");
+const strokeCountText = document.querySelector("#stroke-count");
+const roundScoreText = document.querySelector("#round-score");
+const nextHoleButton = document.querySelector("#next-hole");
+const newRoundButton = document.querySelector("#new-round");
+const scorecardBody = document.querySelector("#scorecard-body");
+
+function currentHole() {
+  return HOLES[currentHoleIndex];
+}
+
+function holeScale() {
+  return 200 / currentHole().distance;
+}
+
+function worldToScreen(point) {
+  const scale = holeScale();
+  return {
+    x: tee.x + point.lateral * scale,
+    y: tee.y - point.downrange * scale,
+  };
+}
+
+function remainingToBasket(point = currentLie) {
+  return Math.hypot(currentHole().distance - point.downrange, point.lateral);
+}
+
+function roundRelativeToPar() {
+  return holeScores.reduce((total, strokes, index) => {
+    if (strokes == null) return total;
+    return total + strokes - HOLES[index].par;
+  }, 0);
+}
+
+function formatRelative(score) {
+  if (score === 0) return "E";
+  return score > 0 ? `+${score}` : String(score);
+}
+
+function renderScorecard() {
+  if (!scorecardBody) return;
+  scorecardBody.innerHTML = HOLES.map((hole, index) => {
+    const score = holeScores[index];
+    const active = index === currentHoleIndex ? " active" : "";
+    return `<div class="scorecard-hole${active}">
+      <span>${hole.number}</span>
+      <small>PAR ${hole.par}</small>
+      <strong>${score == null ? "—" : score}</strong>
+    </div>`;
+  }).join("");
+}
+
+function updateRoundUI() {
+  const hole = currentHole();
+  if (holeChip) holeChip.innerHTML = `<span class="status-dot"></span> 9-HOLE ROUND <span class="chip-divider">/</span> HOLE ${String(hole.number).padStart(2, "0")}`;
+  if (holeNameText) holeNameText.textContent = `${hole.name.toUpperCase()} · PAR ${hole.par}`;
+  if (holeMetaText) holeMetaText.innerHTML = `${hole.distance} FT <i></i> HOLE ${hole.number} OF ${HOLES.length}`;
+  if (distanceNumber) distanceNumber.textContent = String(Math.round(remainingToBasket()));
+  if (teeLabel) teeLabel.innerHTML = `<span class="tee-dot"></span> ${strokesThisHole === 0 ? `TEE ${String(hole.number).padStart(2, "0")}` : `LIE · SHOT ${strokesThisHole + 1}`} <span>${strokesThisHole === 0 ? "YOU ARE HERE" : `${Math.round(remainingToBasket())} FT LEFT`}</span>`;
+  if (basketDistanceText) basketDistanceText.textContent = `${Math.round(remainingToBasket())} FT`;
+  if (sceneCaption) sceneCaption.innerHTML = `${strokesThisHole === 0 ? "VIEW FROM THE TEE" : "PLAYING FROM YOUR LIE"} <span>·</span> ${hole.note.toUpperCase()}`;
+  if (strokeCountText) strokeCountText.textContent = String(strokesThisHole);
+  if (roundScoreText) roundScoreText.textContent = formatRelative(roundRelativeToPar());
+  if (nextHoleButton) {
+    nextHoleButton.hidden = !holeComplete;
+    nextHoleButton.textContent = currentHoleIndex === HOLES.length - 1 ? "Finish round" : "Next hole →";
+  }
+  renderScorecard();
+}
 
 const discInputs = {
   name: document.querySelector("#disc-name"),
@@ -116,6 +211,7 @@ renderSavedDiscs();
 updateDiscReadout();
 
 
+
 const controls = {
   speed: document.querySelector("#speed"),
   aim: document.querySelector("#aim"),
@@ -148,98 +244,53 @@ function getShot() {
   const aimAngle = Number(controls.aim.value);
   const launchAngle = Number(controls.launch.value);
   const hyzerAngle = Number(controls.hyzer.value);
-  const aimRadians = (aimAngle * Math.PI) / 180;
   const profile = getDiscProfile();
 
-  /*
-   * Distance model:
-   * - Release mph is still the biggest factor.
-   * - Disc Speed is a power requirement, not free distance.
-   * - Glide adds carry once the disc has enough speed.
-   * - Turn can add a little usable carry when activated at high speed.
-   * - Fade costs a little distance as the disc slows and finishes.
-   */
   const requiredMph = 24 + profile.speed * 2.7;
   const speedActivation = Math.max(0.25, Math.min(1.12, speed / requiredMph));
-
-  const launchEfficiency = Math.max(
-    0.68,
-    1 - Math.pow((launchAngle - 11) / 24, 2) * 0.16,
-  );
-  const releaseAngleEfficiency = Math.max(
-    0.76,
-    1 - Math.abs(hyzerAngle) * 0.0022,
-  );
-
-  // Faster discs only earn their extra potential when thrown fast enough.
+  const launchEfficiency = Math.max(0.68, 1 - Math.pow((launchAngle - 11) / 24, 2) * 0.16);
+  const releaseAngleEfficiency = Math.max(0.76, 1 - Math.abs(hyzerAngle) * 0.0022);
   const discSpeedPotential = 0.94 + Math.min(profile.speed, 12) * 0.008;
-  const underSpeedPenalty =
-    1 - Math.max(0, 0.92 - speedActivation) * (0.18 + profile.speed * 0.008);
-
-  // Glide 1–7 changes carry by about -12% to +12% around a glide-4 disc.
+  const underSpeedPenalty = 1 - Math.max(0, 0.92 - speedActivation) * (0.18 + profile.speed * 0.008);
   const glideCarry = 1 + (profile.glide - 4) * 0.04 * Math.min(1, speedActivation + 0.15);
-
-  // High-speed turn can hold the disc in the air slightly longer.
-  const turnCarry =
-    1 + Math.max(0, -profile.turn) * 0.009 * Math.min(1, speedActivation);
-
-  // Strong fade dumps some forward distance late in the flight.
-  const fadeCost =
-    1 - profile.fade * 0.012 * (0.75 + Math.max(0, 1 - speedActivation) * 0.5);
-
-  // Base mph-to-distance curve. It is intentionally sub-linear at higher speeds.
+  const turnCarry = 1 + Math.max(0, -profile.turn) * 0.009 * Math.min(1, speedActivation);
+  const fadeCost = 1 - profile.fade * 0.012 * (0.75 + Math.max(0, 1 - speedActivation) * 0.5);
   const baseDistance = 4.35 * speed + 0.0105 * speed * speed;
-
-  const distance = Math.round(Math.max(
-    20,
-    baseDistance *
-      launchEfficiency *
-      releaseAngleEfficiency *
-      discSpeedPotential *
-      underSpeedPenalty *
-      glideCarry *
-      turnCarry *
-      fadeCost,
+  const distance = Math.round(Math.max(20,
+    baseDistance * launchEfficiency * releaseAngleEfficiency *
+    discSpeedPotential * underSpeedPenalty * glideCarry * turnCarry * fadeCost
   ));
 
-  const downrange = distance * Math.cos(aimRadians);
-  const aimDrift = distance * Math.sin(aimRadians);
+  const targetForward = currentHole().distance - currentLie.downrange;
+  const targetLateral = -currentLie.lateral;
+  const targetBearing = Math.atan2(targetLateral, targetForward);
+  const aimRadians = targetBearing + (aimAngle * Math.PI) / 180;
 
   const flightDirection = getFlightDirection(profile.style);
-
-  // Turn is strongest while the disc is moving fast.
-  const turnDrift =
-    (-profile.turn) *
-    Math.pow(speedActivation, 1.35) *
-    (distance / 300) *
-    15 *
-    -flightDirection;
-
-  // Fade is strongest as the disc slows down.
+  const turnDrift = (-profile.turn) * Math.pow(speedActivation, 1.35) * (distance / 300) * 15 * -flightDirection;
   const fadeActivation = 0.72 + Math.max(0, 1 - speedActivation) * 0.8;
-  const fadeDrift =
-    profile.fade *
-    fadeActivation *
-    (distance / 300) *
-    13 *
-    flightDirection;
-
+  const fadeDrift = profile.fade * fadeActivation * (distance / 300) * 13 * flightDirection;
   const releaseDrift = hyzerAngle * (distance / 300) * 1.25;
-  const lateral = aimDrift + turnDrift + fadeDrift + releaseDrift;
-  const remaining = Math.round(Math.hypot(300 - downrange, lateral));
+  const shapeDrift = turnDrift + fadeDrift + releaseDrift;
+
+  const forwardDelta = distance * Math.cos(aimRadians);
+  const lateralDelta = distance * Math.sin(aimRadians) + shapeDrift;
+  const landingWorld = {
+    lateral: currentLie.lateral + lateralDelta,
+    downrange: currentLie.downrange + forwardDelta,
+  };
+  const landingScreen = worldToScreen(landingWorld);
+  const remaining = Math.round(remainingToBasket(landingWorld));
 
   return {
-    speed,
-    launchAngle,
-    distance,
-    downrange,
-    lateral,
-    turnDrift,
-    fadeDrift,
+    speed, launchAngle, distance, profile, turnDrift, fadeDrift,
     remaining,
-    profile,
-    x: tee.x + lateral * 0.68,
-    y: tee.y - downrange * 0.67,
+    startWorld: { ...currentLie },
+    landingWorld,
+    x: landingScreen.x,
+    y: landingScreen.y,
+    lateral: lateralDelta,
+    downrange: forwardDelta,
   };
 }
 
@@ -262,6 +313,10 @@ function announce(text) {
 
 function finishShot(shot, id) {
   if (id !== shotId) return;
+  strokesThisHole += 1;
+  currentLie = { ...shot.landingWorld };
+  const remaining = Math.round(remainingToBasket());
+
   disc.classList.remove("in-flight");
   disc.setAttribute("transform", `translate(${shot.x} ${shot.y}) rotate(${shot.lateral > 0 ? 8 : -8})`);
   landingMarker.setAttribute("transform", `translate(${shot.x} ${shot.y})`);
@@ -269,49 +324,56 @@ function finishShot(shot, id) {
   flightPath.style.opacity = ".85";
   shotResults.hidden = false;
   resultDistance.textContent = `${shot.distance} ft`;
-  const past = shot.downrange > 300;
-  const remaining = Math.abs(shot.remaining);
-  remainingLabel.textContent = past ? "PAST THE BASKET" : "TO THE BASKET";
-  resultRemaining.textContent = past
-    ? `${Math.round(shot.downrange - 300)} ft past`
-    : `${remaining} ft`;
-  announce(
-    past
-      ? `Landed ${shot.distance} feet. ${Math.round(shot.downrange - 300)} feet past the basket.`
-      : `Landed ${shot.distance} feet. ${remaining} feet to the basket.`,
-  );
-  if (throwButton) throwButton.disabled = false;
+
+  // A throw that finishes within 12 ft is treated as made so the camera simulator
+  // can complete a hole without needing to model chains/cage physics.
+  if (remaining <= 12) {
+    holeComplete = true;
+    holeScores[currentHoleIndex] = strokesThisHole;
+    remainingLabel.textContent = "HOLE COMPLETE";
+    resultRemaining.textContent = `${strokesThisHole} ${strokesThisHole === 1 ? "throw" : "throws"}`;
+    announce(`Hole ${currentHole().number} complete in ${strokesThisHole} throws.`);
+  } else {
+    remainingLabel.textContent = "TO THE BASKET";
+    resultRemaining.textContent = `${remaining} ft`;
+    announce(`Landed ${shot.distance} feet. ${remaining} feet to the basket. Your next throw starts from this lie.`);
+  }
+
+  if (throwButton) throwButton.disabled = holeComplete;
   if (throwButton) throwButton.innerHTML = '<span class="throw-icon" aria-hidden="true">➜</span> Throw again';
+  updateRoundUI();
 }
 
 function throwDisc(event) {
   if (event) event.preventDefault();
+  if (holeComplete) return;
+
   cancelAnimationFrame(animationFrame);
   const id = ++shotId;
   const shot = getShot();
+  const start = worldToScreen(shot.startWorld);
   const apex = Math.max(31, shot.launchAngle * 2.7);
-  const turnPixels = shot.turnDrift * 0.68;
+  const turnPixels = shot.turnDrift * holeScale();
   const control1 = {
-    x: tee.x + shot.lateral * 0.08 + turnPixels * 0.65,
-    y: tee.y - shot.downrange * 0.23 - apex,
+    x: start.x + (shot.x - start.x) * 0.08 + turnPixels * 0.65,
+    y: start.y + (shot.y - start.y) * 0.23 - apex,
   };
   const control2 = {
-    x: tee.x + shot.lateral * 0.58 + turnPixels,
-    y: shot.y - shot.downrange * 0.23 - apex * 0.6,
+    x: start.x + (shot.x - start.x) * 0.58 + turnPixels,
+    y: shot.y - Math.abs(shot.y - start.y) * 0.23 - apex * 0.6,
   };
-  const pathData = `M ${tee.x} ${tee.y} C ${control1.x} ${control1.y}, ${control2.x} ${control2.y}, ${shot.x} ${shot.y}`;
-  flightPath.setAttribute("d", pathData);
+
+  flightPath.setAttribute("d", `M ${start.x} ${start.y} C ${control1.x} ${control1.y}, ${control2.x} ${control2.y}, ${shot.x} ${shot.y}`);
   flightPath.style.opacity = ".82";
   flightPath.style.strokeDasharray = "1";
   flightPath.style.strokeDashoffset = "1";
   flightPath.setAttribute("pathLength", "1");
   landingMarker.style.opacity = "0";
   shotResults.hidden = true;
-  disc.setAttribute("transform", `translate(${tee.x} ${tee.y})`);
+  disc.setAttribute("transform", `translate(${start.x} ${start.y})`);
   disc.classList.add("in-flight");
   if (throwButton) throwButton.disabled = true;
-  if (throwButton) throwButton.textContent = "In flight…";
-  announce(`${shot.profile.name} · ${shot.profile.speed} / ${shot.profile.glide} / ${shot.profile.turn} / ${shot.profile.fade} is in the air.`);
+  announce(`${shot.profile.name} · shot ${strokesThisHole + 1} on hole ${currentHole().number} is in the air.`);
 
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const duration = reducedMotion ? 90 : Math.max(1150, Math.min(2400, 900 + shot.distance * 3));
@@ -320,15 +382,12 @@ function throwDisc(event) {
   function animate(now) {
     if (id !== shotId) return;
     const progress = Math.min(1, (now - started) / duration);
-    const point = cubicPoint(progress, tee, control1, control2, shot);
+    const point = cubicPoint(progress, start, control1, control2, shot);
     const tilt = (shot.lateral >= 0 ? 1 : -1) * Math.sin(progress * Math.PI * 5) * 12;
     disc.setAttribute("transform", `translate(${point.x} ${point.y}) rotate(${tilt})`);
     flightPath.style.strokeDashoffset = String(1 - progress);
-    if (progress < 1) {
-      animationFrame = requestAnimationFrame(animate);
-    } else {
-      finishShot(shot, id);
-    }
+    if (progress < 1) animationFrame = requestAnimationFrame(animate);
+    else finishShot(shot, id);
   }
   animationFrame = requestAnimationFrame(animate);
 }
@@ -337,6 +396,10 @@ function resetHole() {
   shotId += 1;
   cancelAnimationFrame(animationFrame);
   animationFrame = 0;
+  currentLie = { lateral: 0, downrange: 0 };
+  strokesThisHole = 0;
+  holeComplete = false;
+  holeScores[currentHoleIndex] = null;
   disc.classList.remove("in-flight");
   disc.setAttribute("transform", `translate(${tee.x} ${tee.y})`);
   flightPath.setAttribute("d", "");
@@ -351,12 +414,49 @@ function resetHole() {
   flightLive.classList.remove("visible");
   flightLive.textContent = "";
   if (throwButton) throwButton.disabled = false;
-  if (throwButton) throwButton.innerHTML = '<span class="throw-icon" aria-hidden="true">➜</span> Throw disc';
+  updateRoundUI();
+}
+
+function startHole(index) {
+  currentHoleIndex = index;
+  currentLie = { lateral: 0, downrange: 0 };
+  strokesThisHole = 0;
+  holeComplete = false;
+  shotId += 1;
+  cancelAnimationFrame(animationFrame);
+  disc.classList.remove("in-flight");
+  disc.setAttribute("transform", `translate(${tee.x} ${tee.y})`);
+  flightPath.setAttribute("d", "");
+  flightPath.style.opacity = "0";
+  landingMarker.style.opacity = "0";
+  shotResults.hidden = true;
+  flightLive.classList.remove("visible");
+  updateRoundUI();
+}
+
+function nextHole() {
+  if (!holeComplete) return;
+  if (currentHoleIndex < HOLES.length - 1) {
+    startHole(currentHoleIndex + 1);
+  } else {
+    const total = holeScores.reduce((sum, value) => sum + (value || 0), 0);
+    announce(`Round complete: ${total} throws, ${formatRelative(roundRelativeToPar())} to par.`);
+    if (nextHoleButton) nextHoleButton.hidden = true;
+  }
+}
+
+function newRound() {
+  holeScores = Array(HOLES.length).fill(null);
+  currentHoleIndex = 0;
+  startHole(0);
 }
 
 form.addEventListener("submit", throwDisc);
 resetButton.addEventListener("click", resetHole);
+if (nextHoleButton) nextHoleButton.addEventListener("click", nextHole);
+if (newRoundButton) newRoundButton.addEventListener("click", newRound);
 updateLabels();
+updateRoundUI();
 
 const cameraSimValuesText = document.querySelector("#camera-sim-values");
 const cameraMediaDevices = navigator.mediaDevices;

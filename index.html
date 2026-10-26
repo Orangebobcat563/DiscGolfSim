@@ -16,7 +16,7 @@
           <span class="brand-mark" aria-hidden="true"><span></span></span>
           <span>FAIRWAY <b>PRACTICE</b></span>
         </a>
-        <div class="course-chip"><span class="status-dot"></span> PRACTICE FIELD <span class="chip-divider">/</span> HOLE 01</div>
+        <div class="course-chip" id="hole-chip"><span class="status-dot"></span> 9-HOLE ROUND <span class="chip-divider">/</span> HOLE 01</div>
       </header>
 
       <section class="camera-setup-panel" aria-labelledby="camera-setup-title">
@@ -151,14 +151,14 @@
         </div>
         <div class="distance-marker" aria-label="Basket is 300 feet away">
           <span class="marker-icon" aria-hidden="true">◎</span>
-          <span><b>300</b><small>FEET TO BASKET</small></span>
+          <span><b id="hole-distance-number">300</b><small>FEET TO BASKET</small></span>
         </div>
       </section>
 
       <section class="course-card" aria-label="Disc golf hole view">
         <div class="course-meta">
           <span><span class="sun-icon" aria-hidden="true">◌</span> CALM CONDITIONS</span>
-          <span class="course-meta-right">STRAIGHTAWAY <i></i> 300 FT</span>
+          <span class="course-meta-right" id="hole-meta">300 FT <i></i> HOLE 1 OF 9</span>
         </div>
         <div class="course-view" id="course-view">
           <svg class="course-art" viewBox="0 0 1200 470" preserveAspectRatio="xMidYMid slice" role="img" aria-labelledby="scene-title scene-desc">
@@ -221,15 +221,15 @@
               <path d="M-16 0h32" stroke="#f6b178" stroke-width="1" opacity=".8"/>
             </g>
           </svg>
-          <div class="tee-label"><span class="tee-dot"></span> TEE 01 <span>YOU ARE HERE</span></div>
-          <div class="basket-callout"><span class="callout-line"></span><span>THE BASKET<small>300 FT</small></span></div>
+          <div class="tee-label" id="tee-label"><span class="tee-dot"></span> TEE 01 <span>YOU ARE HERE</span></div>
+          <div class="basket-callout"><span class="callout-line"></span><span>THE BASKET<small id="basket-distance-text">300 FT</small></span></div>
           <div class="flight-live" id="flight-live" aria-live="polite"></div>
           <div class="shot-results" id="shot-results" aria-live="polite" aria-atomic="true" hidden>
             <div><span>THROW DISTANCE</span><strong id="result-distance">—</strong></div>
             <i></i>
             <div><span id="remaining-label">TO THE BASKET</span><strong id="result-remaining">—</strong></div>
           </div>
-          <div class="scene-caption">VIEW FROM THE TEE <span>·</span> STRAIGHT, WITH A LITTLE ROOM TO SHAPE IT</div>
+          <div class="scene-caption" id="scene-caption">VIEW FROM THE TEE <span>·</span> STRAIGHT, WITH A LITTLE ROOM TO SHAPE IT</div>
         </div>
         <div class="course-footer">
           <span><i class="legend-dot"></i> FAIRWAY</span><span><i class="legend-ring"></i> TARGET ZONE</span>
@@ -237,6 +237,19 @@
         </div>
       </section>
 
+
+
+        <div class="round-panel" aria-label="Round score">
+          <div class="round-summary">
+            <div><span>CURRENT HOLE</span><strong><b id="stroke-count">0</b> throws</strong></div>
+            <div><span>ROUND SCORE</span><strong id="round-score">E</strong></div>
+            <div class="round-actions">
+              <button id="next-hole" type="button" hidden>Next hole →</button>
+              <button id="new-round" type="button">New round</button>
+            </div>
+          </div>
+          <div class="scorecard" id="scorecard-body" aria-label="Nine hole scorecard"></div>
+        </div>
 
       <section class="disc-selection-panel" aria-labelledby="disc-selection-title">
         <div class="disc-selection-heading">

@@ -304,3 +304,59 @@ input[type="range"]:focus-visible { outline: 3px solid #dfaa73; outline-offset: 
 .control-group:has(#hyzer) {
   display: none !important;
 }
+
+
+/* 9-hole round / play-from-your-lie */
+.round-panel {
+  margin: 18px 0 24px;
+  border: 1px solid rgba(76, 93, 72, .24);
+  border-radius: 16px;
+  background: rgba(250, 247, 232, .76);
+  padding: 14px;
+}
+.round-summary {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.round-summary > div:not(.round-actions) { display: grid; gap: 2px; }
+.round-summary span { font-size: 10px; letter-spacing: .12em; color: #6e765f; }
+.round-summary strong { font-size: 18px; color: #354c3a; }
+.round-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+.round-actions button {
+  border: 1px solid #7a866d;
+  border-radius: 999px;
+  background: #f6f1df;
+  color: #34483a;
+  min-height: 40px;
+  padding: 0 16px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.round-actions #next-hole { background: #435d48; color: #fffaf0; }
+.scorecard {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(54px, 1fr));
+  gap: 6px;
+  margin-top: 12px;
+  overflow-x: auto;
+}
+.scorecard-hole {
+  min-width: 54px;
+  border: 1px solid rgba(76, 93, 72, .18);
+  border-radius: 10px;
+  padding: 7px 5px;
+  text-align: center;
+  display: grid;
+  gap: 1px;
+}
+.scorecard-hole.active { outline: 2px solid #6d7d60; outline-offset: 1px; }
+.scorecard-hole span { font-size: 11px; }
+.scorecard-hole small { font-size: 8px; color: #727864; }
+.scorecard-hole strong { font-size: 16px; color: #354c3a; }
+@media (max-width: 700px) {
+  .round-actions { margin-left: 0; width: 100%; }
+  .scorecard { grid-template-columns: repeat(9, 58px); }
+}

@@ -1,3 +1,4 @@
+alert("SCRIPT.JS IS WORKING");
 const form = document.querySelector("#shot-form");
 const throwButton = document.querySelector("#throw-button");
 const resetButton = document.querySelector("#reset-button");

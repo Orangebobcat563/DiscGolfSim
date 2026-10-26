@@ -255,7 +255,10 @@ function getShot() {
   const glideCarry = 1 + (profile.glide - 4) * 0.04 * Math.min(1, speedActivation + 0.15);
   const turnCarry = 1 + Math.max(0, -profile.turn) * 0.009 * Math.min(1, speedActivation);
   const fadeCost = 1 - profile.fade * 0.012 * (0.75 + Math.max(0, 1 - speedActivation) * 0.5);
-  const baseDistance = 4.35 * speed + 0.0105 * speed * speed;
+  // Softer throws lose more distance, while normal/hard drives stay close
+  // to the existing tuning. This makes touch shots actually feel like touch shots.
+  const slowThrowFactor = Math.max(0.38, Math.min(1, 0.38 + speed * 0.0124));
+  const baseDistance = (4.35 * speed + 0.0105 * speed * speed) * slowThrowFactor;
   const distance = Math.round(Math.max(20,
     baseDistance * launchEfficiency * releaseAngleEfficiency *
     discSpeedPotential * underSpeedPenalty * glideCarry * turnCarry * fadeCost

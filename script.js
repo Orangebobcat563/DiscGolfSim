@@ -1,4 +1,3 @@
-alert("SCRIPT.JS IS WORKING");
 const form = document.querySelector("#shot-form");
 const throwButton = document.querySelector("#throw-button");
 const resetButton = document.querySelector("#reset-button");
@@ -308,6 +307,7 @@ form.addEventListener("submit", throwDisc);
 resetButton.addEventListener("click", resetHole);
 updateLabels();
 
+const cameraSimValuesText = document.querySelector("#camera-sim-values");
 const cameraMediaDevices = navigator.mediaDevices;
 const cameraStartButton = document.querySelector("#start-cameras");
 const cameraStopButton = document.querySelector("#stop-cameras");
@@ -436,6 +436,12 @@ function triggerThrowFromDiscDetection(timestamp) {
     }
 
     updateLabels();
+    if (cameraSimValuesText) {
+      const cameraAngle = Number(controls.hyzer.value);
+      const angleName = cameraAngle === 0 ? "flat" : cameraAngle < 0 ? "hyzer" : "anhyzer";
+      cameraSimValuesText.textContent =
+        `${controls.speed.value} mph · aim ${Number(controls.aim.value).toFixed(1)}° · ${angleName} ${Math.abs(cameraAngle).toFixed(1)}°`;
+    }
     lastAutomaticThrowAt = now;
     recentThrowSpeeds = [];
     lastCamera1Detection = null;

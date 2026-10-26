@@ -124,6 +124,15 @@
           <p class="detection-setup-hint" id="camera2-measurement-status" role="status" aria-live="polite">Start Camera 2 and throw through both camera views.</p>
         </div>
 
+
+        <div class="speed-calibration" aria-labelledby="camera-sim-values-title">
+          <div class="speed-calibration-heading">
+            <div><p class="eyebrow">LIVE CAMERA → SIMULATOR</p><h3 id="camera-sim-values-title">Throw values</h3></div>
+            <output class="measured-speed" id="camera-sim-values">Waiting for a throw…</output>
+          </div>
+          <p class="calibration-help">Camera 1 supplies throw speed. Camera 2 supplies left/right aim and hyzer/anhyzer. A detected throw launches automatically.</p>
+        </div>
+
         <div class="camera-action-row">
           <div class="camera-actions">
             <button class="camera-start-button" id="start-cameras" type="button">Start Cameras</button>
@@ -281,8 +290,8 @@
 
       <section class="practice-panel" aria-labelledby="controls-title">
         <div class="controls-heading">
-          <div><p class="eyebrow">DIAL IN YOUR RELEASE</p><h2 id="controls-title">Shot setup</h2></div>
-          <p class="setup-tip"><span aria-hidden="true">↗</span> Small changes make a big difference.</p>
+          <div><p class="eyebrow">CAMERA CONTROLLED</p><h2 id="controls-title">Automatic throw</h2></div>
+          <p class="setup-tip"><span aria-hidden="true">◎</span> Camera 1 measures speed · Camera 2 measures release.</p>
         </div>
         <form id="shot-form">
           <div class="controls-grid">
@@ -312,7 +321,7 @@
             </div>
           </div>
           <div class="action-row">
-            <div class="action-note"><span class="action-bullet"></span><span>Ready when you are.<small>Your settings stay put when you reset.</small></span></div>
+            <div class="action-note"><span class="action-bullet"></span><span>Ready for a real throw.<small>The simulator launches automatically when Camera 1 detects the disc.</small></span></div>
             <div class="actions">
               <button class="reset-button" id="reset-button" type="button"><span aria-hidden="true">↺</span> Reset hole</button>
               

@@ -288,3 +288,19 @@ input[type="range"]:focus-visible { outline: 3px solid #dfaa73; outline-offset: 
  .calibration-row { align-items:stretch; flex-direction:column; }
  .calibration-row button { width:100%; }
 }
+
+
+/* Camera-only throw controls: inputs remain in the DOM for camera measurements/physics. */
+#speed, #aim, #launch, #hyzer {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+.control-group:has(#speed),
+.control-group:has(#aim),
+.control-group:has(#launch),
+.control-group:has(#hyzer) {
+  display: none !important;
+}

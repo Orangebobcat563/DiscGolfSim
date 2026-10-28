@@ -140,7 +140,19 @@
         </div>
 
 
-        <div class="speed-calibration" aria-labelledby="camera-sim-values-title">
+        <div class="speed-calibration" id="live-throw-arm-panel">
+  <div class="speed-calibration-heading">
+    <div>
+      <p class="eyebrow">LIVE THROW CONTROL</p>
+      <h3>Arm your next simulator throw</h3>
+    </div>
+    <output class="measured-speed" id="live-throw-arm-status">NOT ARMED</output>
+  </div>
+  <p class="calibration-help">Test throws can measure speed without counting on the hole. When you are ready, click the button below or press SPACE. Only the next detected throw will launch the simulator.</p>
+  <button class="color-select-button" id="arm-live-throw" type="button" disabled>ARM LIVE THROW</button>
+</div>
+
+<div class="speed-calibration" aria-labelledby="camera-sim-values-title">
           <div class="speed-calibration-heading">
             <div><p class="eyebrow">LIVE CAMERA → SIMULATOR</p><h3 id="camera-sim-values-title">Throw values</h3></div>
             <output class="measured-speed" id="camera-sim-values">Waiting for a throw…</output>
@@ -358,6 +370,11 @@
         </form>
       </section>
       <footer class="page-footer"><span>GOOD THROWS ARE BUILT, NOT RUSHED.</span><span>FAIRWAY PRACTICE <b>·</b> FIELD NOTES 01</span></footer>
-    </main>
+    
+<div id="live-throw-toast" class="live-throw-toast" role="status" aria-live="polite">
+  🔒 LIVE THROW LOCKED IN
+</div>
+
+</main>
   </body>
 </html>

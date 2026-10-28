@@ -551,6 +551,7 @@ const CAMERA1_PREDICTION_SEARCH_RADIUS = 115;
 
 
 let measuredThrowSpeedMph = null;
+let liveThrowArmed = false;
 let recentThrowSpeeds = [];
 
 let lastCamera2Detection = null;
@@ -573,6 +574,13 @@ const AUTO_THROW_MIN_MPH = 2;
 
 
 function triggerThrowFromDiscDetection(timestamp) {
+  if (!liveThrowArmed) {
+    if (Number.isFinite(measuredThrowSpeedMph) && liveThrowArmStatus) {
+      liveThrowArmStatus.textContent = `${measuredThrowSpeedMph.toFixed(1)} MPH READY`;
+    }
+    return;
+  }
+
   if (!detectionThrowArmed) return;
   if (timestamp - lastAutomaticThrowAt < AUTO_THROW_COOLDOWN_MS) return;
 
@@ -635,6 +643,12 @@ function triggerThrowFromDiscDetection(timestamp) {
     }
 
     throwDisc();
+      liveThrowArmed = false;
+      if (armLiveThrowButton) {
+        armLiveThrowButton.textContent = "ARM LIVE THROW";
+        armLiveThrowButton.disabled = !Number.isFinite(measuredThrowSpeedMph);
+      }
+      if (liveThrowArmStatus) liveThrowArmStatus.textContent = "NOT ARMED";
   }, 180);
 }
 
@@ -667,6 +681,9 @@ function scheduleAutomaticCameraThrow() {
 const calibrationDistanceInput = document.querySelector("#calibration-distance");
 const startSpeedCalibrationButton = document.querySelector("#start-speed-calibration");
 const useMeasuredSpeedButton = document.querySelector("#use-measured-speed");
+const armLiveThrowButton = document.querySelector("#arm-live-throw");
+const liveThrowArmStatus = document.querySelector("#live-throw-arm-status");
+const liveThrowToast = document.querySelector("#live-throw-toast");
 const speedCalibrationStatus = document.querySelector("#speed-calibration-status");
 const measuredSpeedOutput = document.querySelector("#measured-speed");
 const camera2AimOutput = document.querySelector("#camera2-aim-output");
@@ -787,29 +804,27 @@ function camera1DirectionGateAllowsThrow(region, sourceX, sourceY, timestamp) {
 
   camera1DirectionSamples.push({ x: sourceX, y: sourceY, t: timestamp });
   camera1DirectionSamples = camera1DirectionSamples
-    .filter((point) => timestamp - point.t <= 260)
-    .slice(-7);
+    .filter((point) => timestamp - point.t <= 220)
+    .slice(-5);
 
   if (camera1DirectionSamples.length < 2) return false;
 
-  // Any clear movement away from the selected throwing side counts.
-  // Camera 1 alone decides that a throw happened.
-  for (let i = 0; i < camera1DirectionSamples.length - 1; i += 1) {
-    const first = camera1DirectionSamples[i];
-    const last = camera1DirectionSamples[camera1DirectionSamples.length - 1];
-    const dx = last.x - first.x;
-    const startsOnThrowSide = camera1ThrowSide === "left"
-      ? first.x <= PROCESS_WIDTH * 0.68
-      : first.x >= PROCESS_WIDTH * 0.32;
-    const movingAway = camera1ThrowSide === "left" ? dx >= 5 : dx <= -5;
+  const first = camera1DirectionSamples[0];
+  const last = camera1DirectionSamples[camera1DirectionSamples.length - 1];
+  const dx = last.x - first.x;
 
-    if (startsOnThrowSide && movingAway) {
-      camera1DirectionSamples = [];
-      return true;
-    }
-  }
+  // Only accept motion that starts on the selected throwing side and travels
+  // away from that side. No size/shape/minimum-speed test is used here.
+  const startFraction = first.x / Math.max(1, cameraSlots[0].video.videoWidth || PROCESS_WIDTH);
+  const startsOnThrowSide = camera1ThrowSide === "left"
+    ? startFraction <= 0.55
+    : startFraction >= 0.45;
+  const movingAway = camera1ThrowSide === "left" ? dx > 8 : dx < -8;
 
-  return false;
+  if (!startsOnThrowSide || !movingAway) return false;
+
+  camera1DirectionSamples = [];
+  return true;
 }
 
 function updateThrowSideSetupText() {
@@ -958,6 +973,7 @@ function recordCamera1Speed(sourceX, sourceY, timestamp) {
     measuredThrowSpeedMph = estimate;
     measuredSpeedOutput.textContent = `${estimate.toFixed(1)} mph`;
     useMeasuredSpeedButton.disabled = false;
+    if (armLiveThrowButton) armLiveThrowButton.disabled = false;
     speedCalibrationStatus.textContent =
       `Speed detected: ${estimate.toFixed(1)} mph. Throw captured — launching…`;
   }
@@ -967,6 +983,38 @@ function recordCamera1Speed(sourceX, sourceY, timestamp) {
 
 startSpeedCalibrationButton.addEventListener("click", beginSpeedCalibration);
 cameraSlots[0].video.addEventListener("click", handleSpeedCalibrationClick);
+
+let liveThrowToastTimer = null;
+
+function showLiveThrowToast(message = "🔒 LIVE THROW LOCKED IN") {
+  if (!liveThrowToast) return;
+  liveThrowToast.textContent = message;
+  liveThrowToast.classList.add("show");
+  clearTimeout(liveThrowToastTimer);
+  liveThrowToastTimer = setTimeout(() => {
+    liveThrowToast.classList.remove("show");
+  }, 1400);
+}
+
+function armLiveThrow() {
+  if (!Number.isFinite(measuredThrowSpeedMph)) {
+    showLiveThrowToast("⚠ THROW A TEST SHOT FIRST");
+    return;
+  }
+
+  controls.speed.value = String(Math.round(measuredThrowSpeedMph));
+  liveThrowArmed = true;
+  if (armLiveThrowButton) armLiveThrowButton.textContent = "NEXT THROW ARMED";
+  if (liveThrowArmStatus) {
+    liveThrowArmStatus.textContent = `${measuredThrowSpeedMph.toFixed(1)} MPH ARMED`;
+  }
+  speedCalibrationStatus.textContent =
+    `Live Throw armed at ${measuredThrowSpeedMph.toFixed(1)} mph. Your next detected throw will count.`;
+  showLiveThrowToast(`🔒 LOCKED IN · ${measuredThrowSpeedMph.toFixed(1)} MPH`);
+}
+
+armLiveThrowButton?.addEventListener("click", armLiveThrow);
+
 useMeasuredSpeedButton.addEventListener("click", () => {
   if (!Number.isFinite(measuredThrowSpeedMph)) return;
   controls.speed.value = String(Math.round(Math.max(Number(controls.speed.min), Math.min(Number(controls.speed.max), measuredThrowSpeedMph))));
@@ -1974,6 +2022,18 @@ throwSideRightButton?.addEventListener("click", () => {
 });
 
 updateThrowSideSetupText();
+
+
+document.addEventListener("keydown", (event) => {
+  if (event.code !== "Space" || event.repeat) return;
+
+  const target = event.target;
+  const tagName = target?.tagName?.toLowerCase();
+  if (tagName === "input" || tagName === "select" || tagName === "textarea") return;
+
+  event.preventDefault();
+  armLiveThrow();
+});
 
 cameraStartButton.addEventListener("click", () => void startCameras());
 cameraStopButton.addEventListener("click", stopCameras);

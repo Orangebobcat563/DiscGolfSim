@@ -360,3 +360,28 @@ input[type="range"]:focus-visible { outline: 3px solid #dfaa73; outline-offset: 
   .round-actions { margin-left: 0; width: 100%; }
   .scorecard { grid-template-columns: repeat(9, 58px); }
 }
+
+
+/* Short on-simulator confirmation when Live Throw is armed. */
+.live-throw-toast {
+  position: fixed;
+  left: 50%;
+  top: 18%;
+  transform: translate(-50%, -10px) scale(0.96);
+  z-index: 9999;
+  padding: 12px 18px;
+  border-radius: 999px;
+  background: rgba(12, 20, 18, 0.94);
+  color: #fff;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.live-throw-toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0) scale(1);
+}

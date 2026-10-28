@@ -551,6 +551,7 @@ const CAMERA1_PREDICTION_SEARCH_RADIUS = 115;
 
 
 let measuredThrowSpeedMph = null;
+let nextThrowLocked = false;
 let liveThrowArmed = false;
 let recentThrowSpeeds = [];
 
@@ -574,12 +575,9 @@ const AUTO_THROW_MIN_MPH = 2;
 
 
 function triggerThrowFromDiscDetection(timestamp) {
-  if (!liveThrowArmed) {
-    if (Number.isFinite(measuredThrowSpeedMph) && liveThrowArmStatus) {
-      liveThrowArmStatus.textContent = `${measuredThrowSpeedMph.toFixed(1)} MPH READY`;
-    }
-    return;
-  }
+  // SPACE/button locks the next real detection. The speed is allowed
+  // to come from this same throw; no previous measured speed is required.
+  if (!nextThrowLocked) return;
 
   if (!detectionThrowArmed) return;
   if (timestamp - lastAutomaticThrowAt < AUTO_THROW_COOLDOWN_MS) return;
@@ -643,6 +641,11 @@ function triggerThrowFromDiscDetection(timestamp) {
     }
 
     throwDisc();
+      nextThrowLocked = false;
+      liveThrowArmed = false;
+      if (armLiveThrowButton) armLiveThrowButton.textContent = "ARM LIVE THROW";
+      if (liveThrowArmStatus) liveThrowArmStatus.textContent = "NOT ARMED";
+      showThrowLockConfirm("✓ THROW SENT TO COURSE");
       liveThrowArmed = false;
       if (armLiveThrowButton) {
         armLiveThrowButton.textContent = "ARM LIVE THROW";
@@ -683,18 +686,22 @@ const startSpeedCalibrationButton = document.querySelector("#start-speed-calibra
 const useMeasuredSpeedButton = document.querySelector("#use-measured-speed");
 const armLiveThrowButton = document.querySelector("#arm-live-throw");
 const liveThrowArmStatus = document.querySelector("#live-throw-arm-status");
-const spaceArmConfirmation = document.querySelector("#space-arm-confirmation");
-const spaceArmConfirmationText = document.querySelector("#space-arm-confirmation-text");
-let spaceArmConfirmationTimer = null;
-
-function flashSpaceArmConfirmation(message) {
-  if (!spaceArmConfirmation) return;
-  if (spaceArmConfirmationText) spaceArmConfirmationText.textContent = message;
-  clearTimeout(spaceArmConfirmationTimer);
-  spaceArmConfirmation.classList.add("show");
-  spaceArmConfirmationTimer = setTimeout(() => {
-    spaceArmConfirmation.classList.remove("show");
-  }, 1500);
+const throwLockConfirm = document.querySelector("#throw-lock-confirm");
+const throwLockConfirmText = document.querySelector("#throw-lock-confirm-text");
+let throwLockConfirmTimer = null;
+function showThrowLockConfirm(text) {
+  if (!throwLockConfirm) return;
+  throwLockConfirmText.textContent = text;
+  clearTimeout(throwLockConfirmTimer);
+  throwLockConfirm.classList.add("show");
+  throwLockConfirmTimer = setTimeout(() => throwLockConfirm.classList.remove("show"), 1300);
+}
+function lockNextThrow() {
+  nextThrowLocked = true;
+  liveThrowArmed = true;
+  if (armLiveThrowButton) armLiveThrowButton.textContent = "NEXT THROW LOCKED";
+  if (liveThrowArmStatus) liveThrowArmStatus.textContent = "LOCKED IN";
+  showThrowLockConfirm("🔒 THROW LOCKED IN · THROW NOW");
 }
 
 const liveThrowToast = document.querySelector("#live-throw-toast");
@@ -1027,14 +1034,7 @@ function armLiveThrow() {
   showLiveThrowToast(`🔒 LOCKED IN · ${measuredThrowSpeedMph.toFixed(1)} MPH`);
 }
 
-armLiveThrowButton?.addEventListener("click", () => {
-  armLiveThrow();
-  flashSpaceArmConfirmation(
-    Number.isFinite(measuredThrowSpeedMph)
-      ? `🔒 LIVE THROW ARMED · ${measuredThrowSpeedMph.toFixed(1)} MPH`
-      : "⚠ THROW A TEST SHOT FIRST"
-  );
-});
+armLiveThrowButton?.addEventListener("click", lockNextThrow);
 
 useMeasuredSpeedButton.addEventListener("click", () => {
   if (!Number.isFinite(measuredThrowSpeedMph)) return;
@@ -2047,18 +2047,10 @@ updateThrowSideSetupText();
 
 document.addEventListener("keydown", (event) => {
   if (event.code !== "Space" || event.repeat) return;
-
-  const target = event.target;
-  const tagName = target?.tagName?.toLowerCase();
-  if (tagName === "input" || tagName === "select" || tagName === "textarea") return;
-
+  const tag = event.target?.tagName?.toLowerCase();
+  if (tag === "input" || tag === "textarea" || tag === "select") return;
   event.preventDefault();
-  armLiveThrow();
-  flashSpaceArmConfirmation(
-    Number.isFinite(measuredThrowSpeedMph)
-      ? `🔒 LIVE THROW ARMED · ${measuredThrowSpeedMph.toFixed(1)} MPH`
-      : "⚠ THROW A TEST SHOT FIRST"
-  );
+  lockNextThrow();
 });
 
 cameraStartButton.addEventListener("click", () => void startCameras());

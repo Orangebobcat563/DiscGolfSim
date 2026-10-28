@@ -9,11 +9,7 @@
     <link rel="stylesheet" href="./style.css" />
     <script type="module" src="./script.js"></script>
   </head>
-  <body>
-<div id="space-arm-confirmation" class="space-arm-confirmation" aria-live="assertive">
-  <div id="space-arm-confirmation-text">🔒 LIVE THROW ARMED</div>
-</div>
-
+  <body><div id="throw-lock-confirm" class="throw-lock-confirm"><div id="throw-lock-confirm-text">🔒 THROW LOCKED IN</div></div>
     <main class="practice-shell">
       <header class="topbar">
         <a class="brand" href="./" aria-label="Fairway Practice home">
@@ -152,7 +148,7 @@
     </div>
     <output class="measured-speed" id="live-throw-arm-status">NOT ARMED</output>
   </div>
-  <p class="calibration-help">Test throws can measure speed without counting on the hole. When you are ready, click the button below or press SPACE. Only the next detected throw will launch the simulator.</p>
+  <p class="calibration-help">Test throws can measure speed without counting on the hole. Press SPACE or click the button BEFORE you throw. The next detected throw uses its own measured speed and launches on the course.</p>
   <button class="color-select-button" id="arm-live-throw" type="button" disabled>ARM LIVE THROW</button>
 </div>
 

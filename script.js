@@ -787,27 +787,29 @@ function camera1DirectionGateAllowsThrow(region, sourceX, sourceY, timestamp) {
 
   camera1DirectionSamples.push({ x: sourceX, y: sourceY, t: timestamp });
   camera1DirectionSamples = camera1DirectionSamples
-    .filter((point) => timestamp - point.t <= 220)
-    .slice(-5);
+    .filter((point) => timestamp - point.t <= 260)
+    .slice(-7);
 
   if (camera1DirectionSamples.length < 2) return false;
 
-  const first = camera1DirectionSamples[0];
-  const last = camera1DirectionSamples[camera1DirectionSamples.length - 1];
-  const dx = last.x - first.x;
+  // Any clear movement away from the selected throwing side counts.
+  // Camera 1 alone decides that a throw happened.
+  for (let i = 0; i < camera1DirectionSamples.length - 1; i += 1) {
+    const first = camera1DirectionSamples[i];
+    const last = camera1DirectionSamples[camera1DirectionSamples.length - 1];
+    const dx = last.x - first.x;
+    const startsOnThrowSide = camera1ThrowSide === "left"
+      ? first.x <= PROCESS_WIDTH * 0.68
+      : first.x >= PROCESS_WIDTH * 0.32;
+    const movingAway = camera1ThrowSide === "left" ? dx >= 5 : dx <= -5;
 
-  // Only accept motion that starts on the selected throwing side and travels
-  // away from that side. No size/shape/minimum-speed test is used here.
-  const startFraction = first.x / Math.max(1, cameraSlots[0].video.videoWidth || PROCESS_WIDTH);
-  const startsOnThrowSide = camera1ThrowSide === "left"
-    ? startFraction <= 0.55
-    : startFraction >= 0.45;
-  const movingAway = camera1ThrowSide === "left" ? dx > 8 : dx < -8;
+    if (startsOnThrowSide && movingAway) {
+      camera1DirectionSamples = [];
+      return true;
+    }
+  }
 
-  if (!startsOnThrowSide || !movingAway) return false;
-
-  camera1DirectionSamples = [];
-  return true;
+  return false;
 }
 
 function updateThrowSideSetupText() {

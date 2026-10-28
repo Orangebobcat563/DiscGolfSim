@@ -531,6 +531,15 @@ let lastCamera1Detection = null;
 let camera1TrackHistory = [];
 let camera1Velocity = { x: 0, y: 0 };
 let camera1LastRegionCenter = null;
+let throwValidationState = "waiting";
+let throwValidationSamples = [];
+let throwLockStartedAt = -Infinity;
+let throwLastDiscSeenAt = -Infinity;
+const THROW_CONFIRM_FRAMES = 3;
+const THROW_MIN_VALID_MPH = 12;
+const THROW_LOCK_MS = 700;
+const THROW_REARM_ABSENCE_MS = 450;
+
 let measuredThrowSpeedMph = null;
 let recentThrowSpeeds = [];
 
@@ -759,6 +768,89 @@ function handleSpeedCalibrationClick(event) {
   speedCalibrationActive = false;
   cameraSlots[0].preview.classList.remove("is-color-picking");
   speedCalibrationStatus.textContent = `Calibrated: ${pixelDistance.toFixed(0)} px = ${realDistanceInches} in. Throw the disc through Camera 1's view.`;
+}
+
+
+function resetThrowValidation() {
+  throwValidationState = "waiting";
+  throwValidationSamples = [];
+  throwLastDiscSeenAt = -Infinity;
+}
+
+function camera1ThrowLooksDiscLike(region) {
+  if (!region) return false;
+  const width = Math.max(1, region.maxX - region.minX + 1);
+  const height = Math.max(1, region.maxY - region.minY + 1);
+  const areaFraction = region.area / (PROCESS_WIDTH * PROCESS_HEIGHT);
+  const aspect = Math.max(width, height) / Math.max(1, Math.min(width, height));
+  return region.area >= 8 &&
+    areaFraction <= 0.055 &&
+    width <= PROCESS_WIDTH * 0.34 &&
+    height <= PROCESS_HEIGHT * 0.34 &&
+    aspect <= 8.5;
+}
+
+function validateCamera1Throw(region, sourceX, sourceY, timestamp) {
+  throwLastDiscSeenAt = timestamp;
+  if (throwValidationState === "locked") return false;
+
+  if (!camera1ThrowLooksDiscLike(region)) {
+    throwValidationSamples = [];
+    return false;
+  }
+
+  throwValidationSamples.push({ x: sourceX, y: sourceY, t: timestamp });
+  throwValidationSamples = throwValidationSamples
+    .filter((point) => timestamp - point.t <= 260)
+    .slice(-6);
+
+  if (throwValidationSamples.length < THROW_CONFIRM_FRAMES) return false;
+
+  const first = throwValidationSamples[0];
+  const last = throwValidationSamples[throwValidationSamples.length - 1];
+  const dt = (last.t - first.t) / 1000;
+  if (dt <= 0.018) return false;
+
+  const travel = Math.hypot(last.x - first.x, last.y - first.y);
+  if (travel < 12) return false;
+
+  // Require several consecutive movements in the same general direction.
+  const steps = [];
+  for (let i = 1; i < throwValidationSamples.length; i += 1) {
+    const a = throwValidationSamples[i - 1];
+    const b = throwValidationSamples[i];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    if (Math.hypot(dx, dy) >= 2) steps.push({ dx, dy });
+  }
+  if (steps.length < THROW_CONFIRM_FRAMES - 1) return false;
+
+  const totalDx = last.x - first.x;
+  const totalDy = last.y - first.y;
+  const totalLength = Math.max(1, Math.hypot(totalDx, totalDy));
+  const ux = totalDx / totalLength;
+  const uy = totalDy / totalLength;
+  const forwardSteps = steps.filter((step) => step.dx * ux + step.dy * uy > 0).length;
+  if (forwardSteps < THROW_CONFIRM_FRAMES - 1) return false;
+
+  if (Number.isFinite(measuredThrowSpeedMph) &&
+      measuredThrowSpeedMph < THROW_MIN_VALID_MPH) return false;
+
+  throwValidationState = "locked";
+  throwLockStartedAt = timestamp;
+  return true;
+}
+
+function maybeRearmValidatedThrow(timestamp) {
+  if (
+    throwValidationState === "locked" &&
+    timestamp - throwLockStartedAt >= THROW_LOCK_MS &&
+    timestamp - throwLastDiscSeenAt >= THROW_REARM_ABSENCE_MS
+  ) {
+    resetThrowValidation();
+    detectionThrowArmed = true;
+    discDetectionStartedAt = -Infinity;
+  }
 }
 
 function recordCamera1Speed(sourceX, sourceY, timestamp) {
@@ -1154,7 +1246,8 @@ function processCameraDetection(slot) {
           recentThrowSpeeds = [];
         }
 
-        if (now - discDetectionStartedAt > DETECTION_REARM_MS) {
+        maybeRearmValidatedThrow(now);
+        if (throwValidationState === "waiting" && now - discDetectionStartedAt > DETECTION_REARM_MS) {
           detectionThrowArmed = true;
           discDetectionStartedAt = -Infinity;
         }
@@ -1185,7 +1278,9 @@ function processCameraDetection(slot) {
         }
       }
       camera1LastRegionCenter = { x: region.centerX, y: region.centerY };
-      triggerThrowFromDiscDetection(detectionTime);
+      if (validateCamera1Throw(region, sourceX, sourceY, detectionTime)) {
+        triggerThrowFromDiscDetection(detectionTime);
+      }
     }
     if (slot === cameraSlots[1]) {
       recordCamera2Throw(sourceX, sourceY, detectionTime, region);
@@ -1756,6 +1851,7 @@ async function startCameras() {
 }
 
 function stopCameras() {
+  resetThrowValidation();
   cameraStartToken += 1;
   cameraStarting = false;
   stopDetectionLoop();

@@ -385,3 +385,30 @@ input[type="range"]:focus-visible { outline: 3px solid #dfaa73; outline-offset: 
   opacity: 1;
   transform: translate(-50%, 0) scale(1);
 }
+
+.space-arm-confirmation {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+}
+.space-arm-confirmation.show {
+  opacity: 1;
+  visibility: visible;
+}
+#space-arm-confirmation-text {
+  padding: 24px 34px;
+  border: 4px solid white;
+  border-radius: 18px;
+  background: rgba(5, 18, 14, 0.97);
+  color: white;
+  font-size: clamp(24px, 5vw, 48px);
+  font-weight: 900;
+  text-align: center;
+  box-shadow: 0 20px 70px rgba(0,0,0,.55);
+}

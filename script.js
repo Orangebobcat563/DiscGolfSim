@@ -683,6 +683,20 @@ const startSpeedCalibrationButton = document.querySelector("#start-speed-calibra
 const useMeasuredSpeedButton = document.querySelector("#use-measured-speed");
 const armLiveThrowButton = document.querySelector("#arm-live-throw");
 const liveThrowArmStatus = document.querySelector("#live-throw-arm-status");
+const spaceArmConfirmation = document.querySelector("#space-arm-confirmation");
+const spaceArmConfirmationText = document.querySelector("#space-arm-confirmation-text");
+let spaceArmConfirmationTimer = null;
+
+function flashSpaceArmConfirmation(message) {
+  if (!spaceArmConfirmation) return;
+  if (spaceArmConfirmationText) spaceArmConfirmationText.textContent = message;
+  clearTimeout(spaceArmConfirmationTimer);
+  spaceArmConfirmation.classList.add("show");
+  spaceArmConfirmationTimer = setTimeout(() => {
+    spaceArmConfirmation.classList.remove("show");
+  }, 1500);
+}
+
 const liveThrowToast = document.querySelector("#live-throw-toast");
 const speedCalibrationStatus = document.querySelector("#speed-calibration-status");
 const measuredSpeedOutput = document.querySelector("#measured-speed");
@@ -1013,7 +1027,14 @@ function armLiveThrow() {
   showLiveThrowToast(`🔒 LOCKED IN · ${measuredThrowSpeedMph.toFixed(1)} MPH`);
 }
 
-armLiveThrowButton?.addEventListener("click", armLiveThrow);
+armLiveThrowButton?.addEventListener("click", () => {
+  armLiveThrow();
+  flashSpaceArmConfirmation(
+    Number.isFinite(measuredThrowSpeedMph)
+      ? `🔒 LIVE THROW ARMED · ${measuredThrowSpeedMph.toFixed(1)} MPH`
+      : "⚠ THROW A TEST SHOT FIRST"
+  );
+});
 
 useMeasuredSpeedButton.addEventListener("click", () => {
   if (!Number.isFinite(measuredThrowSpeedMph)) return;
@@ -2033,6 +2054,11 @@ document.addEventListener("keydown", (event) => {
 
   event.preventDefault();
   armLiveThrow();
+  flashSpaceArmConfirmation(
+    Number.isFinite(measuredThrowSpeedMph)
+      ? `🔒 LIVE THROW ARMED · ${measuredThrowSpeedMph.toFixed(1)} MPH`
+      : "⚠ THROW A TEST SHOT FIRST"
+  );
 });
 
 cameraStartButton.addEventListener("click", () => void startCameras());

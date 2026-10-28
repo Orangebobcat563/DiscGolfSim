@@ -514,8 +514,8 @@ const cameraApiAvailable = Boolean(
 let availableVideoCameras = [];
 let cameraStarting = false;
 let cameraStartToken = 0;
-const PROCESS_WIDTH = 320;
-const PROCESS_HEIGHT = 180;
+const PROCESS_WIDTH = 400;
+const PROCESS_HEIGHT = 225;
 const MIN_DETECTION_PIXELS = 12;
 const MAX_DETECTION_FRACTION = 0.28;
 const DETECTION_INTERVAL_MS = 12;
@@ -528,6 +528,9 @@ let speedCalibrationActive = false;
 let speedCalibrationPoints = [];
 let pixelsPerInch = null;
 let lastCamera1Detection = null;
+let camera1TrackHistory = [];
+let camera1Velocity = { x: 0, y: 0 };
+let camera1LastRegionCenter = null;
 let measuredThrowSpeedMph = null;
 let recentThrowSpeeds = [];
 
@@ -598,6 +601,7 @@ function triggerThrowFromDiscDetection(timestamp) {
     }
     lastAutomaticThrowAt = now;
     recentThrowSpeeds = [];
+    camera1TrackHistory = [];
     lastCamera1Detection = null;
 
     if (speedCalibrationStatus) {
@@ -633,6 +637,7 @@ function scheduleAutomaticCameraThrow() {
     updateLabels();
     lastAutomaticThrowAt = performance.now();
     recentThrowSpeeds = [];
+    camera1TrackHistory = [];
     lastCamera1Detection = null;
     speedCalibrationStatus.textContent = `AUTO THROW: ${controls.speed.value} mph · launching simulator now`;
     throwDisc();
@@ -727,6 +732,7 @@ function beginSpeedCalibration() {
   speedCalibrationActive = true;
   speedCalibrationPoints = [];
   lastCamera1Detection = null;
+  camera1TrackHistory = [];
   recentThrowSpeeds = [];
   speedCalibrationStatus.textContent = "Calibration: click the FIRST marker in Camera 1.";
   cameraSlots[0].preview.classList.add("is-color-picking");
@@ -759,43 +765,60 @@ function recordCamera1Speed(sourceX, sourceY, timestamp) {
   if (!pixelsPerInch || speedCalibrationActive || colorPicking) return;
 
   const current = { x: sourceX, y: sourceY, t: timestamp };
+  camera1TrackHistory.push(current);
 
-  if (lastCamera1Detection) {
-    const dt = (timestamp - lastCamera1Detection.t) / 1000;
+  // Keep enough history to bridge one or two missed webcam frames.
+  camera1TrackHistory = camera1TrackHistory.filter(
+    (point) => timestamp - point.t <= 180,
+  );
+
+  const candidateSpeeds = [];
+
+  // Measure the newest point against several older points instead of only the
+  // immediately previous frame. Fast discs can move so far that a frame is
+  // blurred or missed; a multi-frame baseline is much more stable.
+  for (let index = 0; index < camera1TrackHistory.length - 1; index += 1) {
+    const previous = camera1TrackHistory[index];
+    const dt = (timestamp - previous.t) / 1000;
+    if (dt < 0.018 || dt > 0.145) continue;
+
     const pixels = Math.hypot(
-      sourceX - lastCamera1Detection.x,
-      sourceY - lastCamera1Detection.y,
+      sourceX - previous.x,
+      sourceY - previous.y,
     );
+    if (pixels < 3) continue;
 
-    // Very short gaps are noisy and long gaps usually mean the detector lost the disc.
-    if (dt >= 0.014 && dt <= 0.12 && pixels >= 2) {
-      const mph = ((pixels / pixelsPerInch) / dt) / 17.6;
+    const mph = ((pixels / pixelsPerInch) / dt) / 17.6;
+    if (mph >= 2 && mph <= 95) candidateSpeeds.push(mph);
+  }
 
-      if (mph >= 2 && mph <= 90) {
-        // Keep more samples than before, then use a trimmed median instead of
-        // choosing a high percentile. This rejects one-frame tracking jumps.
-        recentThrowSpeeds.push(mph);
-        recentThrowSpeeds = recentThrowSpeeds.slice(-10);
+  if (candidateSpeeds.length) {
+    candidateSpeeds.sort((a, b) => a - b);
 
-        const sorted = [...recentThrowSpeeds].sort((a, b) => a - b);
-        let usable = sorted;
-        if (sorted.length >= 5) {
-          usable = sorted.slice(1, -1);
-        }
+    // Use the upper-middle reading. Motion blur tends to pull detected centers
+    // toward each other and under-read full-power throws, while this still
+    // avoids using a single extreme outlier.
+    const candidateIndex = Math.min(
+      candidateSpeeds.length - 1,
+      Math.floor(candidateSpeeds.length * 0.65),
+    );
+    const frameEstimate = candidateSpeeds[candidateIndex];
 
-        const middle = Math.floor(usable.length / 2);
-        const estimate = usable.length % 2
-          ? usable[middle]
-          : (usable[middle - 1] + usable[middle]) / 2;
+    recentThrowSpeeds.push(frameEstimate);
+    recentThrowSpeeds = recentThrowSpeeds.slice(-8);
 
-        measuredThrowSpeedMph = estimate;
-        measuredSpeedOutput.textContent = `${estimate.toFixed(1)} mph`;
-        useMeasuredSpeedButton.disabled = false;
-        speedCalibrationStatus.textContent =
-          `Speed detected: ${estimate.toFixed(1)} mph. Throw captured — launching…`;
-        /* throw is triggered directly by disc detection */
-      }
-    }
+    const sorted = [...recentThrowSpeeds].sort((a, b) => a - b);
+    const estimateIndex = Math.min(
+      sorted.length - 1,
+      Math.floor(sorted.length * 0.65),
+    );
+    const estimate = sorted[estimateIndex];
+
+    measuredThrowSpeedMph = estimate;
+    measuredSpeedOutput.textContent = `${estimate.toFixed(1)} mph`;
+    useMeasuredSpeedButton.disabled = false;
+    speedCalibrationStatus.textContent =
+      `Speed detected: ${estimate.toFixed(1)} mph. Throw captured — launching…`;
   }
 
   lastCamera1Detection = current;
@@ -945,23 +968,57 @@ function drawDetectionOverlay(slot, region) {
   context.stroke();
 }
 
+function colorToHsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  let h = 0;
+  if (d) {
+    if (max === r) h = 60 * (((g - b) / d) % 6);
+    else if (max === g) h = 60 * ((b - r) / d + 2);
+    else h = 60 * ((r - g) / d + 4);
+  }
+  if (h < 0) h += 360;
+  return { h, s: max ? d / max : 0, v: max };
+}
+
+function hueDifference(a, b) {
+  const d = Math.abs(a - b);
+  return Math.min(d, 360 - d);
+}
+
+function predictedCamera1Center() {
+  if (!camera1TrackHistory.length) return null;
+  const last = camera1TrackHistory[camera1TrackHistory.length - 1];
+  const age = Math.max(0, Math.min(0.12, (performance.now() - last.t) / 1000));
+  return {
+    x: last.x + camera1Velocity.x * age,
+    y: last.y + camera1Velocity.y * age,
+  };
+}
+
 function findLargestColorRegion(slot, imageData) {
   const pixels = imageData.data;
   const mask = slot.colorMask;
   const queue = slot.componentQueue;
   const target = selectedDiscColor;
   const tolerance = Number(sensitivityInput.value);
-  const toleranceSquared = tolerance * tolerance;
+  const targetHsv = colorToHsv(target.r, target.g, target.b);
+  const hueTolerance = Math.max(10, Math.min(38, tolerance * 0.30));
+  const saturationTolerance = Math.max(0.20, Math.min(0.50, tolerance / 210));
+  const valueTolerance = Math.max(0.24, Math.min(0.62, tolerance / 175));
 
   for (let pixel = 0; pixel < mask.length; pixel += 1) {
     const offset = pixel * 4;
-    const redDifference = pixels[offset] - target.r;
-    const greenDifference = pixels[offset + 1] - target.g;
-    const blueDifference = pixels[offset + 2] - target.b;
+    const hsv = colorToHsv(pixels[offset], pixels[offset + 1], pixels[offset + 2]);
+    const hueMatch = targetHsv.s < 0.10
+      ? Math.abs(hsv.v - targetHsv.v) <= valueTolerance * 0.7
+      : hueDifference(hsv.h, targetHsv.h) <= hueTolerance;
     mask[pixel] = pixels[offset + 3] > 96 &&
-      redDifference * redDifference +
-        greenDifference * greenDifference +
-        blueDifference * blueDifference <= toleranceSquared
+      hueMatch &&
+      Math.abs(hsv.s - targetHsv.s) <= saturationTolerance &&
+      Math.abs(hsv.v - targetHsv.v) <= valueTolerance
       ? 1
       : 0;
   }
@@ -1008,7 +1065,7 @@ function findLargestColorRegion(slot, imageData) {
       }
     }
 
-    if (!largest || tail > largest.area) {
+    {
       const n = Math.max(1, tail);
       const meanX = sumX / n, meanY = sumY / n;
       const varX = Math.max(0, sumXX / n - meanX * meanX);
@@ -1019,7 +1076,22 @@ function findLargestColorRegion(slot, imageData) {
       const root = Math.sqrt(Math.max(0, (varX - varY) ** 2 + 4 * covXY ** 2));
       const major = Math.sqrt(Math.max(0.001, (trace + root) / 2));
       const minor = Math.sqrt(Math.max(0.001, (trace - root) / 2));
-      largest = { area: tail, minX, minY, maxX, maxY, orientationDeg, elongation: major / minor };
+      const candidate = {
+        area: tail, minX, minY, maxX, maxY,
+        centerX: meanX, centerY: meanY,
+        orientationDeg, elongation: major / minor,
+      };
+
+      const prediction = slot === cameraSlots[0] ? predictedCamera1Center() : null;
+      const distance = prediction
+        ? Math.hypot(meanX - prediction.x, meanY - prediction.y)
+        : 0;
+      const trackingBonus = prediction ? Math.max(0.16, 1 - distance / 145) : 1;
+      candidate.trackScore = tail * trackingBonus;
+
+      if (!largest || candidate.trackScore > (largest.trackScore ?? largest.area)) {
+        largest = candidate;
+      }
     }
   }
 
@@ -1029,9 +1101,9 @@ function findLargestColorRegion(slot, imageData) {
   const boxArea = boxWidth * boxHeight;
   const fillRatio = largest.area / boxArea;
   if (
-    largest.area < MIN_DETECTION_PIXELS ||
+    largest.area < Math.max(8, MIN_DETECTION_PIXELS - 4) ||
     largest.area > mask.length * MAX_DETECTION_FRACTION ||
-    fillRatio < 0.12
+    fillRatio < 0.065
   ) {
     return null;
   }
@@ -1067,8 +1139,22 @@ function processCameraDetection(slot) {
     const region = findLargestColorRegion(slot, frame);
     if (!region) {
       if (slot === cameraSlots[0]) {
-        lastCamera1Detection = null;
-        if (performance.now() - discDetectionStartedAt > DETECTION_REARM_MS) {
+        const now = performance.now();
+
+        // Preserve the short track through a missed/blurred frame. Only clear
+        // it after the disc has genuinely been gone for a while.
+        if (
+          camera1TrackHistory.length &&
+          now - camera1TrackHistory[camera1TrackHistory.length - 1].t > 180
+        ) {
+          lastCamera1Detection = null;
+          camera1TrackHistory = [];
+          camera1Velocity = { x: 0, y: 0 };
+          camera1LastRegionCenter = null;
+          recentThrowSpeeds = [];
+        }
+
+        if (now - discDetectionStartedAt > DETECTION_REARM_MS) {
           detectionThrowArmed = true;
           discDetectionStartedAt = -Infinity;
         }
@@ -1085,7 +1171,20 @@ function processCameraDetection(slot) {
     const sourceY = Math.round(crop.y + normalizedY * crop.height);
     const detectionTime = performance.now();
     if (slot === cameraSlots[0]) {
+      const previous = camera1TrackHistory.length >= 2
+        ? camera1TrackHistory[camera1TrackHistory.length - 2]
+        : null;
       recordCamera1Speed(sourceX, sourceY, detectionTime);
+      if (previous) {
+        const dt = (detectionTime - previous.t) / 1000;
+        if (dt > 0.008 && dt < 0.16) {
+          const vx = (sourceX - previous.x) / dt;
+          const vy = (sourceY - previous.y) / dt;
+          camera1Velocity.x = camera1Velocity.x * 0.35 + vx * 0.65;
+          camera1Velocity.y = camera1Velocity.y * 0.35 + vy * 0.65;
+        }
+      }
+      camera1LastRegionCenter = { x: region.centerX, y: region.centerY };
       triggerThrowFromDiscDetection(detectionTime);
     }
     if (slot === cameraSlots[1]) {
@@ -1191,32 +1290,37 @@ function sampleDiscColor(event) {
     0,
     Math.min(PROCESS_HEIGHT - 1, Math.floor(((event.clientY - rect.top) / rect.height) * PROCESS_HEIGHT)),
   );
-  const left = Math.max(0, x - 1);
-  const top = Math.max(0, y - 1);
-  const sampleWidth = Math.min(PROCESS_WIDTH - left, 3);
-  const sampleHeight = Math.min(PROCESS_HEIGHT - top, 3);
+  const radius = 3;
+  const left = Math.max(0, x - radius);
+  const top = Math.max(0, y - radius);
+  const sampleWidth = Math.min(PROCESS_WIDTH - left, radius * 2 + 1);
+  const sampleHeight = Math.min(PROCESS_HEIGHT - top, radius * 2 + 1);
   const sample = slot.processingContext.getImageData(left, top, sampleWidth, sampleHeight).data;
-  let red = 0;
-  let green = 0;
-  let blue = 0;
-  let count = 0;
+  const reds = [];
+  const greens = [];
+  const blues = [];
   for (let offset = 0; offset < sample.length; offset += 4) {
     if (sample[offset + 3] < 96) continue;
-    red += sample[offset];
-    green += sample[offset + 1];
-    blue += sample[offset + 2];
-    count += 1;
+    reds.push(sample[offset]);
+    greens.push(sample[offset + 1]);
+    blues.push(sample[offset + 2]);
   }
-  if (!count) {
-    detectionSetupHint.textContent = "That point was not visible. Click the disc again in Camera 1.";
+  if (!reds.length) {
+    detectionSetupHint.textContent = "That point was not visible. Click near the middle of the disc again.";
     return;
   }
-
-  selectedDiscColor = {
-    r: Math.round(red / count),
-    g: Math.round(green / count),
-    b: Math.round(blue / count),
+  const median = (values) => {
+    values.sort((a, b) => a - b);
+    return values[Math.floor(values.length / 2)];
   };
+  selectedDiscColor = {
+    r: median(reds),
+    g: median(greens),
+    b: median(blues),
+  };
+  camera1TrackHistory = [];
+  camera1Velocity = { x: 0, y: 0 };
+  camera1LastRegionCenter = null;
   setColorPicking(false);
   const rgb = `rgb(${selectedDiscColor.r}, ${selectedDiscColor.g}, ${selectedDiscColor.b})`;
   discColorSwatch.style.backgroundColor = rgb;

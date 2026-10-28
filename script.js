@@ -543,6 +543,11 @@ let camera1ThrowSide = "left";
 let camera1ThrowSideSetupActive = false;
 let camera1ThrowSideSetupPoint = null;
 let camera1DirectionSamples = [];
+let camera1PredictedMisses = 0;
+let camera1LastGoodDetectionAt = -Infinity;
+const CAMERA1_MAX_PREDICTED_MISSES = 3;
+const CAMERA1_PREDICTION_SEARCH_RADIUS = 115;
+
 
 
 let measuredThrowSpeedMph = null;
@@ -1125,7 +1130,7 @@ function hueDifference(a, b) {
 function predictedCamera1Center() {
   if (!camera1TrackHistory.length) return null;
   const last = camera1TrackHistory[camera1TrackHistory.length - 1];
-  const age = Math.max(0, Math.min(0.12, (performance.now() - last.t) / 1000));
+  const age = Math.max(0, Math.min(0.16, (performance.now() - last.t) / 1000));
   return {
     x: last.x + camera1Velocity.x * age,
     y: last.y + camera1Velocity.y * age,
@@ -1139,9 +1144,20 @@ function findLargestColorRegion(slot, imageData) {
   const target = selectedDiscColor;
   const tolerance = Number(sensitivityInput.value);
   const targetHsv = colorToHsv(target.r, target.g, target.b);
-  const hueTolerance = Math.max(10, Math.min(38, tolerance * 0.30));
-  const saturationTolerance = Math.max(0.20, Math.min(0.50, tolerance / 210));
-  const valueTolerance = Math.max(0.24, Math.min(0.62, tolerance / 175));
+  const activelyTrackingFastDisc =
+    slot === cameraSlots[0] && camera1TrackHistory.length >= 2;
+  const hueTolerance = Math.max(
+    10,
+    Math.min(activelyTrackingFastDisc ? 48 : 38, tolerance * (activelyTrackingFastDisc ? 0.38 : 0.30)),
+  );
+  const saturationTolerance = Math.max(
+    0.20,
+    Math.min(activelyTrackingFastDisc ? 0.62 : 0.50, tolerance / (activelyTrackingFastDisc ? 175 : 210)),
+  );
+  const valueTolerance = Math.max(
+    0.24,
+    Math.min(activelyTrackingFastDisc ? 0.72 : 0.62, tolerance / (activelyTrackingFastDisc ? 150 : 175)),
+  );
 
   for (let pixel = 0; pixel < mask.length; pixel += 1) {
     const offset = pixel * 4;
@@ -1220,8 +1236,19 @@ function findLargestColorRegion(slot, imageData) {
       const distance = prediction
         ? Math.hypot(meanX - prediction.x, meanY - prediction.y)
         : 0;
-      const trackingBonus = prediction ? Math.max(0.16, 1 - distance / 145) : 1;
-      candidate.trackScore = tail * trackingBonus;
+
+      // Camera 1: once a throw is moving, position is more trustworthy than
+      // raw blob size. This prevents similarly colored background objects from
+      // stealing the track and gives a blurred disc room to be reacquired.
+      if (prediction) {
+        const insideSearch = distance <= CAMERA1_PREDICTION_SEARCH_RADIUS;
+        const positionWeight = insideSearch
+          ? Math.max(0.35, 1.8 - distance / 75)
+          : Math.max(0.03, 0.22 - (distance - CAMERA1_PREDICTION_SEARCH_RADIUS) / 500);
+        candidate.trackScore = tail * positionWeight;
+      } else {
+        candidate.trackScore = tail;
+      }
 
       if (!largest || candidate.trackScore > (largest.trackScore ?? largest.area)) {
         largest = candidate;
@@ -1277,15 +1304,22 @@ function processCameraDetection(slot) {
 
         // Preserve the short track through a missed/blurred frame. Only clear
         // it after the disc has genuinely been gone for a while.
-        if (
-          camera1TrackHistory.length &&
-          now - camera1TrackHistory[camera1TrackHistory.length - 1].t > 180
-        ) {
-          lastCamera1Detection = null;
-          camera1TrackHistory = [];
-          camera1Velocity = { x: 0, y: 0 };
-          camera1LastRegionCenter = null;
-          recentThrowSpeeds = [];
+        if (camera1TrackHistory.length) {
+          camera1PredictedMisses += 1;
+
+          // Keep the trajectory alive through up to three missed/blurred frames.
+          // Only give up after repeated misses or a clearly stale track.
+          if (
+            camera1PredictedMisses > CAMERA1_MAX_PREDICTED_MISSES ||
+            now - camera1TrackHistory[camera1TrackHistory.length - 1].t > 260
+          ) {
+            lastCamera1Detection = null;
+            camera1TrackHistory = [];
+            camera1Velocity = { x: 0, y: 0 };
+            camera1LastRegionCenter = null;
+            camera1PredictedMisses = 0;
+            recentThrowSpeeds = [];
+          }
         }
 
         if (now - discDetectionStartedAt > DETECTION_REARM_MS) {
@@ -1305,20 +1339,26 @@ function processCameraDetection(slot) {
     const sourceY = Math.round(crop.y + normalizedY * crop.height);
     const detectionTime = performance.now();
     if (slot === cameraSlots[0]) {
-      const previous = camera1TrackHistory.length >= 2
-        ? camera1TrackHistory[camera1TrackHistory.length - 2]
-        : null;
       recordCamera1Speed(sourceX, sourceY, detectionTime);
-      if (previous) {
-        const dt = (detectionTime - previous.t) / 1000;
-        if (dt > 0.008 && dt < 0.16) {
-          const vx = (sourceX - previous.x) / dt;
-          const vy = (sourceY - previous.y) / dt;
-          camera1Velocity.x = camera1Velocity.x * 0.35 + vx * 0.65;
-          camera1Velocity.y = camera1Velocity.y * 0.35 + vy * 0.65;
+
+      // Estimate velocity over a short multi-frame baseline. This is much less
+      // sensitive to one noisy centroid caused by motion blur.
+      if (camera1TrackHistory.length >= 2) {
+        const recent = camera1TrackHistory.slice(-5);
+        const first = recent[0];
+        const last = recent[recent.length - 1];
+        const dt = (last.t - first.t) / 1000;
+        if (dt > 0.012 && dt < 0.18) {
+          const vx = (last.x - first.x) / dt;
+          const vy = (last.y - first.y) / dt;
+          camera1Velocity.x = camera1Velocity.x * 0.25 + vx * 0.75;
+          camera1Velocity.y = camera1Velocity.y * 0.25 + vy * 0.75;
         }
       }
+
       camera1LastRegionCenter = { x: region.centerX, y: region.centerY };
+      camera1PredictedMisses = 0;
+      camera1LastGoodDetectionAt = detectionTime;
       if (camera1DirectionGateAllowsThrow(region, sourceX, sourceY, detectionTime)) {
         triggerThrowFromDiscDetection(detectionTime);
       }

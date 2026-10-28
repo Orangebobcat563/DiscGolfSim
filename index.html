@@ -109,7 +109,22 @@
           <p class="calibration-help">Put two visible marks in Camera 1's view, measure the real distance between them, then click the two marks in the preview.</p>
           <div class="calibration-row">
             <label>Marker distance <span><input id="calibration-distance" type="number" min="6" max="120" step="0.5" value="36"> inches</span></label>
-            <button class="color-select-button" id="start-speed-calibration" type="button" disabled>Calibrate Camera 1</button>
+            
+<div class="speed-calibration">
+  <div class="speed-calibration-heading">
+    <div>
+      <p class="eyebrow">CAMERA 1 THROW DIRECTION</p>
+      <h3>Which side do you throw from?</h3>
+    </div>
+    <output class="measured-speed" id="throw-side-status">Throwing side: LEFT side of Camera 1</output>
+  </div>
+  <p class="calibration-help">Choose the side of Camera 1 where the disc starts. Only movement away from that side can trigger a throw.</p>
+  <div class="camera-actions">
+    <button type="button" id="throw-side-left">I throw from LEFT</button>
+    <button type="button" id="throw-side-right">I throw from RIGHT</button>
+  </div>
+</div>
+<button class="color-select-button" id="start-speed-calibration" type="button" disabled>Calibrate Camera 1</button>
             <button class="color-select-button" id="use-measured-speed" type="button" disabled>Use measured speed</button>
           </div>
           <p class="detection-setup-hint" id="speed-calibration-status" role="status" aria-live="polite">Start Camera 1 first.</p>

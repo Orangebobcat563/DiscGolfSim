@@ -539,6 +539,11 @@ const THROW_CONFIRM_FRAMES = 3;
 const THROW_MIN_VALID_MPH = 12;
 const THROW_LOCK_MS = 700;
 const THROW_REARM_ABSENCE_MS = 450;
+let camera1ThrowSide = "left";
+let camera1ThrowSideSetupActive = false;
+let camera1ThrowSideSetupPoint = null;
+let camera1DirectionSamples = [];
+
 
 let measuredThrowSpeedMph = null;
 let recentThrowSpeeds = [];
@@ -771,6 +776,43 @@ function handleSpeedCalibrationClick(event) {
 }
 
 
+
+function camera1DirectionGateAllowsThrow(region, sourceX, sourceY, timestamp) {
+  if (!region) return false;
+
+  camera1DirectionSamples.push({ x: sourceX, y: sourceY, t: timestamp });
+  camera1DirectionSamples = camera1DirectionSamples
+    .filter((point) => timestamp - point.t <= 220)
+    .slice(-5);
+
+  if (camera1DirectionSamples.length < 2) return false;
+
+  const first = camera1DirectionSamples[0];
+  const last = camera1DirectionSamples[camera1DirectionSamples.length - 1];
+  const dx = last.x - first.x;
+
+  // Only accept motion that starts on the selected throwing side and travels
+  // away from that side. No size/shape/minimum-speed test is used here.
+  const startFraction = first.x / Math.max(1, cameraSlots[0].video.videoWidth || PROCESS_WIDTH);
+  const startsOnThrowSide = camera1ThrowSide === "left"
+    ? startFraction <= 0.55
+    : startFraction >= 0.45;
+  const movingAway = camera1ThrowSide === "left" ? dx > 8 : dx < -8;
+
+  if (!startsOnThrowSide || !movingAway) return false;
+
+  camera1DirectionSamples = [];
+  return true;
+}
+
+function updateThrowSideSetupText() {
+  const existing = document.querySelector("#throw-side-status");
+  if (existing) {
+    existing.textContent =
+      `Throwing side: ${camera1ThrowSide === "left" ? "LEFT" : "RIGHT"} side of Camera 1`;
+  }
+}
+
 function resetThrowValidation() {
   throwValidationState = "waiting";
   throwValidationSamples = [];
@@ -847,7 +889,7 @@ function maybeRearmValidatedThrow(timestamp) {
     timestamp - throwLockStartedAt >= THROW_LOCK_MS &&
     timestamp - throwLastDiscSeenAt >= THROW_REARM_ABSENCE_MS
   ) {
-    resetThrowValidation();
+    camera1DirectionSamples = [];
     detectionThrowArmed = true;
     discDetectionStartedAt = -Infinity;
   }
@@ -1246,8 +1288,7 @@ function processCameraDetection(slot) {
           recentThrowSpeeds = [];
         }
 
-        maybeRearmValidatedThrow(now);
-        if (throwValidationState === "waiting" && now - discDetectionStartedAt > DETECTION_REARM_MS) {
+        if (now - discDetectionStartedAt > DETECTION_REARM_MS) {
           detectionThrowArmed = true;
           discDetectionStartedAt = -Infinity;
         }
@@ -1278,7 +1319,7 @@ function processCameraDetection(slot) {
         }
       }
       camera1LastRegionCenter = { x: region.centerX, y: region.centerY };
-      if (validateCamera1Throw(region, sourceX, sourceY, detectionTime)) {
+      if (camera1DirectionGateAllowsThrow(region, sourceX, sourceY, detectionTime)) {
         triggerThrowFromDiscDetection(detectionTime);
       }
     }
@@ -1874,6 +1915,24 @@ function stopCameras() {
 cameraSlots.forEach((slot, index) => {
   slot.select.addEventListener("change", () => handleCameraSelectionChange(index));
 });
+
+const throwSideLeftButton = document.querySelector("#throw-side-left");
+const throwSideRightButton = document.querySelector("#throw-side-right");
+
+throwSideLeftButton?.addEventListener("click", () => {
+  camera1ThrowSide = "left";
+  camera1DirectionSamples = [];
+  updateThrowSideSetupText();
+});
+
+throwSideRightButton?.addEventListener("click", () => {
+  camera1ThrowSide = "right";
+  camera1DirectionSamples = [];
+  updateThrowSideSetupText();
+});
+
+updateThrowSideSetupText();
+
 cameraStartButton.addEventListener("click", () => void startCameras());
 cameraStopButton.addEventListener("click", stopCameras);
 selectDiscColorButton.addEventListener("click", () => {

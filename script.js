@@ -579,17 +579,12 @@ function triggerThrowFromDiscDetection(timestamp) {
   // to come from this same throw; no previous measured speed is required.
   if (!nextThrowLocked) return;
 
-  if (!detectionThrowArmed) return;
   if (timestamp - lastAutomaticThrowAt < AUTO_THROW_COOLDOWN_MS) return;
 
   if (!Number.isFinite(discDetectionStartedAt) || discDetectionStartedAt < 0) {
     discDetectionStartedAt = timestamp;
   }
 
-  // Reject a one-frame color flash.
-  if (timestamp - discDetectionStartedAt < DETECTION_THROW_DELAY_MS) return;
-
-  detectionThrowArmed = false;
   clearTimeout(autoThrowTimer);
 
   // Give Camera 2 a very short window to report aim/roundness before launching.
@@ -994,6 +989,11 @@ function recordCamera1Speed(sourceX, sourceY, timestamp) {
     measuredThrowSpeedMph = estimate;
     measuredSpeedOutput.textContent = `${estimate.toFixed(1)} mph`;
     useMeasuredSpeedButton.disabled = false;
+
+    // A valid speed from Camera 1 confirms the locked disc throw.
+    if (nextThrowLocked) {
+      triggerThrowFromDiscDetection(timestamp);
+    }
     if (armLiveThrowButton) armLiveThrowButton.disabled = false;
     speedCalibrationStatus.textContent =
       `Speed detected: ${estimate.toFixed(1)} mph. Throw captured — launching…`;

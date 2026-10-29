@@ -257,8 +257,8 @@ function getShot() {
   const fadeCost = 1 - profile.fade * 0.012 * (0.75 + Math.max(0, 1 - speedActivation) * 0.5);
   // Softer throws lose more distance, while normal/hard drives stay close
   // to the existing tuning. This makes touch shots actually feel like touch shots.
-  const slowThrowFactor = Math.max(0.38, Math.min(1, 0.38 + speed * 0.0124));
-  const baseDistance = (4.35 * speed + 0.0105 * speed * speed) * slowThrowFactor;
+  const slowThrowFactor = Math.max(0.24, Math.min(0.94, 0.24 + speed * 0.0115));
+  const baseDistance = (4.05 * speed + 0.0095 * speed * speed) * slowThrowFactor;
   const distance = Math.round(Math.max(20,
     baseDistance * launchEfficiency * releaseAngleEfficiency *
     discSpeedPotential * underSpeedPenalty * glideCarry * turnCarry * fadeCost
@@ -592,9 +592,12 @@ function triggerThrowFromDiscDetection(timestamp) {
     const now = performance.now();
 
     if (Number.isFinite(measuredThrowSpeedMph)) {
+      const cameraSpeedForSim = measuredThrowSpeedMph < 25
+        ? measuredThrowSpeedMph * 0.82
+        : measuredThrowSpeedMph * 0.90;
       controls.speed.value = String(Math.round(
         Math.max(Number(controls.speed.min),
-        Math.min(Number(controls.speed.max), measuredThrowSpeedMph))
+        Math.min(Number(controls.speed.max), cameraSpeedForSim))
       ));
     }
 
@@ -961,7 +964,7 @@ function recordCamera1Speed(sourceX, sourceY, timestamp) {
     if (pixels < 3) continue;
 
     const mph = ((pixels / pixelsPerInch) / dt) / 17.6;
-    if (mph >= 2 && mph <= 95) candidateSpeeds.push(mph);
+    if (mph >= 1 && mph <= 95) candidateSpeeds.push(mph);
   }
 
   if (candidateSpeeds.length) {

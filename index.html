@@ -21,7 +21,25 @@
         <strong id="wii-disc-label">DISC</strong>
         <span id="wii-throw-label">READY</span>
       </div>
-      <div class="wii-hotkey-help">←/→ Disc &nbsp; • &nbsp; N Next Hole &nbsp; • &nbsp; F Full Screen &nbsp; • &nbsp; SPACE Lock Throw</div>
+      
+      <div class="wii-mini-map" aria-label="Hole mini map">
+        <canvas id="wii-mini-map-canvas"></canvas>
+        <div class="mini-map-caption">HOLE MAP</div>
+      </div>
+      <div class="wii-disc-corner" id="wii-disc-corner">
+        <button class="disc-arrow" id="hud-prev-disc" type="button" aria-label="Previous disc">‹</button>
+        <div class="hud-disc-info">
+          <div class="hud-disc-name" id="hud-disc-name">SELECT DISC</div>
+          <div class="hud-flight-numbers">
+            <span><b id="hud-speed">—</b><small>SPEED</small></span>
+            <span><b id="hud-glide">—</b><small>GLIDE</small></span>
+            <span><b id="hud-turn">—</b><small>TURN</small></span>
+            <span><b id="hud-fade">—</b><small>FADE</small></span>
+          </div>
+        </div>
+        <button class="disc-arrow" id="hud-next-disc" type="button" aria-label="Next disc">›</button>
+      </div>
+<div class="wii-hotkey-help">←/→ Disc &nbsp; • &nbsp; N Next Hole &nbsp; • &nbsp; F Full Screen &nbsp; • &nbsp; SPACE Lock Throw</div>
     </section>
 
       <header class="topbar">

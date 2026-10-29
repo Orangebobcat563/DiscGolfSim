@@ -439,3 +439,45 @@ body.sim-big-screen .stats-grid { font-size:1.05rem; }
   display:none !important;
 }
 .wii-course-shell { display:block !important; }
+
+/* Reliable self-contained course renderer */
+#course-3d-canvas { background:#79bde8; }
+
+/* Wii Sports Golf-inspired monitor HUD */
+.wii-course-shell{
+  background:linear-gradient(#73b9e6 0 45%,#77ad59 45% 100%);
+  border:3px solid rgba(255,255,255,.82);
+  box-shadow:inset 0 0 0 2px rgba(0,0,0,.08);
+}
+.wii-hud{
+  background:linear-gradient(180deg,rgba(255,255,255,.96),rgba(231,240,246,.93));
+  color:#183247;border:2px solid rgba(255,255,255,.95);
+  box-shadow:0 3px 10px rgba(0,0,0,.2);border-radius:14px;
+}
+.wii-mini-map{
+  position:absolute;right:16px;top:92px;z-index:5;width:150px;height:220px;
+  border-radius:18px;background:rgba(244,248,241,.92);border:3px solid rgba(255,255,255,.95);
+  box-shadow:0 4px 12px rgba(0,0,0,.23);overflow:hidden;
+}
+#wii-mini-map-canvas{width:100%;height:190px;display:block}
+.mini-map-caption{text-align:center;font-weight:900;font-size:.72rem;color:#365166;letter-spacing:.08em}
+.wii-disc-corner{
+  position:absolute;left:16px;bottom:18px;z-index:6;display:flex;align-items:stretch;
+  min-width:350px;max-width:min(520px,calc(100% - 32px));
+  background:linear-gradient(180deg,rgba(255,255,255,.97),rgba(226,237,244,.95));
+  border:3px solid white;border-radius:18px;box-shadow:0 5px 16px rgba(0,0,0,.28);overflow:hidden;
+}
+.disc-arrow{width:48px;border:0;background:rgba(36,91,126,.10);color:#244c67;font-size:2rem;font-weight:900;cursor:pointer}
+.disc-arrow:hover{background:rgba(36,91,126,.18)}
+.hud-disc-info{flex:1;min-width:0;padding:8px 10px}
+.hud-disc-name{font-weight:950;color:#17384f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:6px}
+.hud-flight-numbers{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
+.hud-flight-numbers span{display:flex;flex-direction:column;align-items:center;padding:4px;border-radius:8px;background:rgba(255,255,255,.7)}
+.hud-flight-numbers b{font-size:1.05rem;color:#102f44;line-height:1}
+.hud-flight-numbers small{font-size:.52rem;font-weight:800;color:#657b89;margin-top:3px}
+.wii-hotkey-help{bottom:96px}
+@media(max-width:650px){
+ .wii-mini-map{width:110px;height:165px;top:88px}.wii-mini-map canvas{height:138px!important}
+ .wii-disc-corner{min-width:0;width:calc(100% - 32px)}
+ .wii-hotkey-help{display:none}
+}

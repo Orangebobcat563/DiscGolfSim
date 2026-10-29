@@ -2133,248 +2133,169 @@ if (cameraApiAvailable) {
 }
 
 
-/* ===== 3D COURSE + MONITOR HOTKEYS ===== */
+/* ===== SELF-CONTAINED COURSE + MONITOR HOTKEYS ===== */
 (() => {
-  const canvas = document.querySelector("#course-3d-canvas");
-  const bigScreenButton = document.querySelector("#big-screen-button");
-  if (!canvas) return;
+  const canvas=document.querySelector("#course-3d-canvas");
+  const bigScreenButton=document.querySelector("#big-screen-button");
+  if(!canvas) return;
+  const ctx=canvas.getContext("2d");
+  const miniCanvas=document.querySelector("#wii-mini-map-canvas");
+  const miniCtx=miniCanvas?.getContext("2d");
+  const hudName=document.querySelector("#hud-disc-name");
+  const hudNums=["speed","glide","turn","fade"].map(k=>document.querySelector("#hud-"+k));
+  let dpr=1, anim=null, visualDisc=null, lastLie={lateral:0,downrange:0};
 
-  let scene, camera3d, renderer, discMesh, basketGroup, lieMarker;
-  let flightAnimation = null;
-  let lastRenderedHole = -1;
-  let lastLieX = 0, lastLieZ = 0;
-
-  function getHoleSafe() {
-    try { return typeof currentHole === "function" ? currentHole() : null; } catch (_) { return null; }
+  function holeSafe(){ try{return typeof currentHole==="function"?currentHole():null}catch(_){return null} }
+  function lieSafe(){ try{return currentLie?{lateral:currentLie.lateral||0,downrange:currentLie.downrange||0}:{lateral:0,downrange:0}}catch(_){return {lateral:0,downrange:0}} }
+  function resize(){
+    const r=canvas.getBoundingClientRect(); dpr=Math.min(devicePixelRatio||1,2);
+    canvas.width=Math.max(1,Math.round(r.width*dpr)); canvas.height=Math.max(1,Math.round(r.height*dpr));
+    ctx.setTransform(dpr,0,0,dpr,0,0); draw();
+  }
+  function project(lateral, forward, height=0){
+    const w=canvas.clientWidth,h=canvas.clientHeight;
+    const depth=Math.max(0,forward);
+    const t=Math.min(1,depth/300);
+    const horizon=h*.31, bottom=h*.92;
+    const y=bottom-(bottom-horizon)*(1-Math.exp(-depth/105))-height*(1.4-t*.7);
+    const spread=(w*.42)*(1-t*.76);
+    const x=w/2+(lateral/55)*spread;
+    return {x,y,scale:Math.max(.18,1-t*.78)};
+  }
+  function tree(x,z){
+    const p=project(x,z),s=p.scale;
+    ctx.fillStyle="#684629";ctx.fillRect(p.x-3*s,p.y-32*s,6*s,32*s);
+    ctx.fillStyle="#28623a";
+    ctx.beginPath();ctx.moveTo(p.x,p.y-70*s);ctx.lineTo(p.x-22*s,p.y-22*s);ctx.lineTo(p.x+22*s,p.y-22*s);ctx.closePath();ctx.fill();
+  }
+  function basket(z){
+    const p=project(0,z),s=Math.max(.35,p.scale);
+    ctx.strokeStyle="#e5e7eb";ctx.lineWidth=Math.max(2,3*s);
+    ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(p.x,p.y-55*s);ctx.stroke();
+    ctx.fillStyle="#ffd43b";ctx.fillRect(p.x-18*s,p.y-52*s,36*s,7*s);
+    ctx.strokeStyle="#d1d5db";ctx.lineWidth=Math.max(1,1.5*s);
+    for(let i=-12;i<=12;i+=6){ctx.beginPath();ctx.moveTo(p.x+i*s,p.y-45*s);ctx.lineTo(p.x+i*.55*s,p.y-20*s);ctx.stroke();}
+    ctx.beginPath();ctx.moveTo(p.x-21*s,p.y-18*s);ctx.lineTo(p.x+21*s,p.y-18*s);ctx.lineTo(p.x+14*s,p.y-10*s);ctx.lineTo(p.x-14*s,p.y-10*s);ctx.closePath();ctx.stroke();
+    ctx.strokeStyle="#f4c430";ctx.beginPath();ctx.moveTo(p.x,p.y-55*s);ctx.lineTo(p.x,p.y-88*s);ctx.stroke();
+    ctx.fillStyle="#ffd43b";ctx.beginPath();ctx.moveTo(p.x,p.y-87*s);ctx.lineTo(p.x+24*s,p.y-80*s);ctx.lineTo(p.x,p.y-73*s);ctx.closePath();ctx.fill();
+  }
+  function draw(){
+    const w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h)return;
+    const hole=holeSafe()||{distance:300,par:3,name:"Hole"};
+    const lie=lieSafe(), remaining=Math.max(1,(hole.distance||300)-lie.downrange);
+    const sky=ctx.createLinearGradient(0,0,0,h*.55);sky.addColorStop(0,"#79bde8");sky.addColorStop(1,"#d9effb");ctx.fillStyle=sky;ctx.fillRect(0,0,w,h);
+    // Soft clouds and rolling hills for a Wii Sports Golf-like bright course feel.
+    ctx.fillStyle="rgba(255,255,255,.78)";
+    for(const c of [[.18,.14,34],[.25,.12,25],[.72,.17,30],[.79,.15,22]]){ctx.beginPath();ctx.arc(w*c[0],h*c[1],c[2],0,Math.PI*2);ctx.fill()}
+    ctx.fillStyle="#5f9253";ctx.beginPath();ctx.moveTo(0,h*.34);ctx.quadraticCurveTo(w*.18,h*.22,w*.36,h*.34);ctx.quadraticCurveTo(w*.56,h*.20,w*.72,h*.34);ctx.quadraticCurveTo(w*.88,h*.25,w,h*.34);ctx.lineTo(w,h*.48);ctx.lineTo(0,h*.48);ctx.closePath();ctx.fill();
+    ctx.fillStyle="#467b42";ctx.fillRect(0,h*.30,w,h*.70);
+    // perspective fairway
+    ctx.fillStyle="#73ad58";ctx.beginPath();ctx.moveTo(w*.43,h*.30);ctx.lineTo(w*.57,h*.30);ctx.lineTo(w*.91,h);ctx.lineTo(w*.09,h);ctx.closePath();ctx.fill();
+    // tee/lie line
+    ctx.strokeStyle="rgba(255,255,255,.55)";ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(w*.38,h*.91);ctx.lineTo(w*.62,h*.91);ctx.stroke();
+    for(let z=18;z<Math.min(remaining,300);z+=20){tree(-34-(z%17)*.35,z);tree(34+(z%13)*.35,z);}
+    basket(Math.min(remaining,300));
+    const d=visualDisc || {lateral:0,forward:0,height:1.2};
+    const dp=project(d.lateral,d.forward,d.height);
+    ctx.save();ctx.translate(dp.x,dp.y);ctx.rotate(d.roll||0);
+    ctx.fillStyle="#ff5a2f";ctx.beginPath();ctx.ellipse(0,0,Math.max(7,13*dp.scale),Math.max(3,5*dp.scale),0,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle="#fff";ctx.lineWidth=1.5;ctx.stroke();ctx.restore();
+    const hi=document.querySelector("#wii-hole-label"),di=document.querySelector("#wii-distance-label");
+    if(hi)hi.textContent=`HOLE ${(typeof currentHoleIndex==="number"?currentHoleIndex:0)+1} · ${hole.name||""}`;
+    if(di)di.textContent=`${Math.round(remaining)} FT LEFT · PAR ${hole.par||3}`;
+    drawMiniMap();
+    updateDiscHud();
+  }
+  function fly(before,after){
+    if(anim)cancelAnimationFrame(anim);
+    const hole=holeSafe()||{distance:300};
+    const dx=(after.lateral||0)-(before.lateral||0), dz=(after.downrange||0)-(before.downrange||0);
+    const start=performance.now(),dur=Math.max(700,Math.min(1900,700+Math.abs(dz)*5));
+    function frame(now){
+      const t=Math.min(1,(now-start)/dur),e=t*t*(3-2*t);
+      visualDisc={lateral:dx*e,forward:Math.max(0,dz*e),height:1.2+Math.sin(Math.PI*t)*Math.min(18,4+Math.abs(dz)*.045),roll:t*12};
+      draw();
+      if(t<1)anim=requestAnimationFrame(frame);else{anim=null;visualDisc=null;draw();}
+    } anim=requestAnimationFrame(frame);
   }
 
-  function init3D() {
-    if (!window.THREE) {
-      const shell = document.querySelector("#wii-course-shell");
-      if (shell) shell.style.background = "linear-gradient(#87c9f4 0 55%, #76a95a 55% 100%)";
-      return;
-    }
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x91cef2);
-    scene.fog = new THREE.Fog(0x91cef2, 85, 235);
-
-    camera3d = new THREE.PerspectiveCamera(58, 1, 0.1, 500);
-    renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    renderer.shadowMap.enabled = true;
-
-    scene.add(new THREE.HemisphereLight(0xeaf7ff, 0x557744, 2.1));
-    const sun = new THREE.DirectionalLight(0xffffff, 2.0);
-    sun.position.set(-30, 55, -20); sun.castShadow = true; scene.add(sun);
-
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(150, 330),
-      new THREE.MeshStandardMaterial({ color:0x5d9b4b, roughness:1 })
-    );
-    ground.rotation.x = -Math.PI/2; ground.position.z = 110; ground.receiveShadow=true; scene.add(ground);
-
-    // Fairway stripe
-    const fairway = new THREE.Mesh(
-      new THREE.PlaneGeometry(42, 290),
-      new THREE.MeshStandardMaterial({ color:0x79b85e, roughness:1 })
-    );
-    fairway.rotation.x=-Math.PI/2; fairway.position.set(0,.015,115); scene.add(fairway);
-
-    // Simple trees lining both sides.
-    const trunkMat = new THREE.MeshStandardMaterial({color:0x6f4b2d});
-    const leafMat = new THREE.MeshStandardMaterial({color:0x2f7139});
-    for (let z=0; z<270; z+=18) {
-      for (const side of [-1,1]) {
-        const x = side * (27 + ((z*7)%13));
-        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(.8,1,7,8),trunkMat);
-        trunk.position.set(x,3.5,z); scene.add(trunk);
-        const crown = new THREE.Mesh(new THREE.ConeGeometry(5.5,13,10),leafMat);
-        crown.position.set(x,12,z); scene.add(crown);
-      }
-    }
-
-    basketGroup = new THREE.Group();
-    const poleMat = new THREE.MeshStandardMaterial({color:0xc9c9c9, metalness:.55, roughness:.35});
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(.14,.14,5.4,10),poleMat); pole.position.y=2.7;
-    const yellowMat = new THREE.MeshStandardMaterial({color:0xffd43b, roughness:.4});
-    const band = new THREE.Mesh(new THREE.CylinderGeometry(1.3,1.3,.4,24),yellowMat); band.position.y=4.55;
-    const tray = new THREE.Mesh(new THREE.CylinderGeometry(1.45,.9,.4,24),poleMat); tray.position.y=1.82;
-    basketGroup.add(pole,band,tray);
-    for(let i=0;i<12;i++){
-      const a=i/12*Math.PI*2;
-      const chain=new THREE.Mesh(new THREE.CylinderGeometry(.028,.028,2.35,5),poleMat);
-      chain.position.set(Math.cos(a)*.8,3.15,Math.sin(a)*.8);
-      basketGroup.add(chain);
-    }
-    const flagPole=new THREE.Mesh(new THREE.CylinderGeometry(.04,.04,3.2,6),poleMat); flagPole.position.y=6.2;
-    const flag=new THREE.Mesh(new THREE.PlaneGeometry(1.6,.8),new THREE.MeshStandardMaterial({color:0xffd43b,side:THREE.DoubleSide}));
-    flag.position.set(.8,7.25,0);
-    basketGroup.add(flagPole,flag);
-    scene.add(basketGroup);
-
-    discMesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(.78,.78,.12,32),
-      new THREE.MeshStandardMaterial({color:0xff5a2f, roughness:.35, emissive:0x2a0802})
-    );
-    discMesh.position.y=1.35;
-    discMesh.castShadow=true;
-    scene.add(discMesh);
-
-    lieMarker = new THREE.Mesh(
-      new THREE.RingGeometry(.7,1.0,24),
-      new THREE.MeshBasicMaterial({color:0xffffff, side:THREE.DoubleSide})
-    );
-    lieMarker.rotation.x=-Math.PI/2; lieMarker.position.y=.04; scene.add(lieMarker);
-
-    resize3D();
-    render3D();
-    window.addEventListener("resize", resize3D);
+  function visibleDiscOptions(){
+    return [...document.querySelectorAll(".disc-option,.disc-card,[data-disc]")].filter(e=>e.offsetParent!==null);
   }
-
-  function feetToWorld(ft) { return ft * 0.62; }
-
-  function syncCourse3D() {
-    if (!scene) return;
-    const hole = getHoleSafe();
-    const idx = typeof currentHoleIndex === "number" ? currentHoleIndex : 0;
-    const distance = hole?.distance || 300;
-    const par = hole?.par || 3;
-    const lie = (typeof currentLie !== "undefined" && currentLie) ? currentLie : {lateral:0,downrange:0};
-
-    const basketZ = feetToWorld(distance);
-    basketGroup.position.set(0,0,basketZ);
-    const lieX = feetToWorld(lie.lateral || 0);
-    const lieZ = feetToWorld(lie.downrange || 0);
-    lieMarker.position.set(lieX,.04,lieZ);
-
-    if (!flightAnimation) discMesh.position.set(lieX,1.25,lieZ);
-
-    const remaining = Math.max(0, distance - (lie.downrange || 0));
-    camera3d.position.set(lieX + 0.3, 5.2, lieZ - 9.5);
-    camera3d.lookAt(lieX, 2.0, Math.min(basketZ, lieZ + 42));
-
-    const holeLabel=document.querySelector("#wii-hole-label");
-    const distLabel=document.querySelector("#wii-distance-label");
-    const discLabel=document.querySelector("#wii-disc-label");
-    if (holeLabel) holeLabel.textContent=`HOLE ${idx+1} · ${hole?.name || ""}`;
-    if (distLabel) distLabel.textContent=`${Math.round(remaining)} FT LEFT · PAR ${par}`;
-    if (discLabel) {
-      const selected = document.querySelector(".disc-option.selected, .disc-card.selected, [aria-pressed='true'][data-disc]");
-      discLabel.textContent = selected?.textContent?.trim()?.split("\n")[0] || "DISC";
-    }
-    lastRenderedHole=idx; lastLieX=lieX; lastLieZ=lieZ;
-    render3D();
+  function selectedDiscElement(){
+    const opts=visibleDiscOptions();
+    return opts.find(e=>e.classList.contains("selected")||e.getAttribute("aria-pressed")==="true"||e.checked) || opts[0] || null;
   }
-
-  function animateVirtualThrow(fromX, fromZ, toX, toZ) {
-    if (!scene || !discMesh) return;
-    if (flightAnimation) cancelAnimationFrame(flightAnimation);
-    const start=performance.now(), duration=1050;
-    function frame(now) {
-      const t=Math.min(1,(now-start)/duration);
-      const ease=t*t*(3-2*t);
-      discMesh.position.x=fromX+(toX-fromX)*ease;
-      discMesh.position.z=fromZ+(toZ-fromZ)*ease;
-      discMesh.position.y=1.2 + Math.sin(Math.PI*t) * Math.min(10, 3 + Math.abs(toZ-fromZ)*.05);
-      discMesh.rotation.z += .22;
-      render3D();
-      if(t<1) flightAnimation=requestAnimationFrame(frame);
-      else { flightAnimation=null; syncCourse3D(); }
-    }
-    flightAnimation=requestAnimationFrame(frame);
+  function readDiscNumbers(el){
+    if(!el)return {name:"NO DISC",speed:"—",glide:"—",turn:"—",fade:"—"};
+    const text=(el.innerText||el.textContent||"").replace(/\s+/g," ").trim();
+    const ds=el.dataset||{};
+    const pick=(key)=>{
+      if(ds[key]!==undefined)return ds[key];
+      const m=text.match(new RegExp(key+"\\\\s*[:\\\\-]?\\\\s*(-?\\\\d+(?:\\\\.\\\\d+)?)","i"));
+      return m?m[1]:"—";
+    };
+    let name=ds.name||ds.discName||el.querySelector(".disc-name,.name,h3,h4,strong")?.textContent?.trim()||text.split(/Speed|Glide|Turn|Fade/i)[0].trim();
+    if(!name)name="SAVED DISC";
+    return {name,speed:pick("speed"),glide:pick("glide"),turn:pick("turn"),fade:pick("fade")};
   }
-
-  function render3D(){ if(renderer&&scene&&camera3d) renderer.render(scene,camera3d); }
-  function resize3D(){
-    if(!renderer||!camera3d) return;
-    const r=canvas.getBoundingClientRect();
-    renderer.setSize(Math.max(1,r.width),Math.max(1,r.height),false);
-    camera3d.aspect=Math.max(1,r.width)/Math.max(1,r.height); camera3d.updateProjectionMatrix(); render3D();
+  function updateDiscHud(){
+    const d=readDiscNumbers(selectedDiscElement());
+    if(hudName)hudName.textContent=d.name;
+    [d.speed,d.glide,d.turn,d.fade].forEach((v,i)=>{if(hudNums[i])hudNums[i].textContent=v});
   }
-
-  function clickDisc(delta) {
-    const options=[...document.querySelectorAll(".disc-option, .disc-card, [data-disc]")].filter(el => el.offsetParent !== null);
-    if (!options.length) return;
-    let i=options.findIndex(el=>el.classList.contains("selected") || el.getAttribute("aria-pressed")==="true" || el.checked);
-    if(i<0)i=0;
-    options[(i+delta+options.length)%options.length].click();
-    setTimeout(syncCourse3D,20);
+  function drawMiniMap(){
+    if(!miniCanvas||!miniCtx)return;
+    const r=miniCanvas.getBoundingClientRect(),ratio=Math.min(devicePixelRatio||1,2);
+    const W=Math.max(1,Math.round(r.width*ratio)),H=Math.max(1,Math.round(r.height*ratio));
+    if(miniCanvas.width!==W||miniCanvas.height!==H){miniCanvas.width=W;miniCanvas.height=H}
+    miniCtx.setTransform(ratio,0,0,ratio,0,0);
+    const w=r.width,h=r.height,hole=holeSafe()||{distance:300},lie=lieSafe();
+    miniCtx.clearRect(0,0,w,h);miniCtx.fillStyle="#dfead5";miniCtx.fillRect(0,0,w,h);
+    // Top-down fairway ribbon.
+    miniCtx.fillStyle="#77ad59";miniCtx.beginPath();
+    miniCtx.moveTo(w*.36,h*.94);miniCtx.bezierCurveTo(w*.18,h*.68,w*.68,h*.48,w*.42,h*.08);
+    miniCtx.lineTo(w*.62,h*.08);miniCtx.bezierCurveTo(w*.86,h*.48,w*.36,h*.68,w*.64,h*.94);miniCtx.closePath();miniCtx.fill();
+    // Basket.
+    miniCtx.fillStyle="#ffd43b";miniCtx.beginPath();miniCtx.arc(w*.52,h*.075,6,0,Math.PI*2);miniCtx.fill();
+    miniCtx.strokeStyle="#4b6170";miniCtx.lineWidth=2;miniCtx.beginPath();miniCtx.moveTo(w*.52,h*.075);miniCtx.lineTo(w*.52,h*.13);miniCtx.stroke();
+    // Player/current lie based on downrange.
+    const progress=Math.max(0,Math.min(1,(lie.downrange||0)/(hole.distance||300)));
+    const py=h*.92-progress*h*.82;
+    const px=w*.50+Math.max(-w*.23,Math.min(w*.23,(lie.lateral||0)*1.2));
+    miniCtx.fillStyle="#ffffff";miniCtx.strokeStyle="#244c67";miniCtx.lineWidth=2;
+    miniCtx.beginPath();miniCtx.arc(px,py,6,0,Math.PI*2);miniCtx.fill();miniCtx.stroke();
+    miniCtx.strokeStyle="rgba(36,76,103,.55)";miniCtx.setLineDash([4,4]);miniCtx.beginPath();miniCtx.moveTo(px,py);miniCtx.lineTo(w*.52,h*.075);miniCtx.stroke();miniCtx.setLineDash([]);
   }
-
-  function nextHoleHotkey() {
-    const candidates=[...document.querySelectorAll("button")];
-    const b=candidates.find(x=>/next hole/i.test(x.textContent));
-    if(b && !b.disabled) b.click();
-    else if (typeof nextHole === "function") nextHole();
-    setTimeout(syncCourse3D,30);
+  function clickDisc(delta){
+    const opts=visibleDiscOptions();
+    if(!opts.length)return;let i=opts.findIndex(e=>e.classList.contains("selected")||e.getAttribute("aria-pressed")==="true");
+    if(i<0)i=0;opts[(i+delta+opts.length)%opts.length].click();
   }
-
-  async function toggleBigScreen() {
-    document.body.classList.toggle("sim-big-screen");
-    const on=document.body.classList.contains("sim-big-screen");
-    bigScreenButton.textContent=on ? "✕ EXIT BIG SCREEN" : "⛶ BIG SCREEN";
-    try {
-      if(on && document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
-      else if(!on && document.fullscreenElement) await document.exitFullscreen();
-    } catch (_) {}
-    setTimeout(resize3D,80);
+  function nextHoleKey(){const b=[...document.querySelectorAll("button")].find(x=>/next hole/i.test(x.textContent));if(b&&!b.disabled)b.click();}
+  async function big(){
+    document.body.classList.toggle("sim-big-screen");const on=document.body.classList.contains("sim-big-screen");
+    if(bigScreenButton)bigScreenButton.textContent=on?"✕ EXIT BIG SCREEN":"⛶ BIG SCREEN";
+    try{if(on&&document.documentElement.requestFullscreen)await document.documentElement.requestFullscreen();else if(!on&&document.fullscreenElement)await document.exitFullscreen()}catch(_){}
+    setTimeout(resize,80);
   }
-
-  bigScreenButton?.addEventListener("click",toggleBigScreen);
-  document.addEventListener("fullscreenchange",()=>{
-    if(!document.fullscreenElement && document.body.classList.contains("sim-big-screen")){
-      document.body.classList.remove("sim-big-screen");
-      if(bigScreenButton) bigScreenButton.textContent="⛶ BIG SCREEN";
-      setTimeout(resize3D,50);
-    }
+  document.querySelector("#hud-prev-disc")?.addEventListener("click",()=>{clickDisc(-1);setTimeout(updateDiscHud,20)});
+  document.querySelector("#hud-next-disc")?.addEventListener("click",()=>{clickDisc(1);setTimeout(updateDiscHud,20)});
+  bigScreenButton?.addEventListener("click",big);
+  document.addEventListener("keydown",e=>{
+    const tag=e.target?.tagName?.toLowerCase();if(["input","textarea","select"].includes(tag))return;
+    if(e.code==="ArrowRight"){e.preventDefault();clickDisc(1)}
+    if(e.code==="ArrowLeft"){e.preventDefault();clickDisc(-1)}
+    if(e.code==="KeyN"){e.preventDefault();nextHoleKey()}
+    if(e.code==="KeyF"){e.preventDefault();big()}
   });
-
-  document.addEventListener("keydown",(e)=>{
-    const tag=e.target?.tagName?.toLowerCase();
-    if(["input","textarea","select"].includes(tag)) return;
-    if(e.code==="ArrowRight"){e.preventDefault();clickDisc(1);}
-    if(e.code==="ArrowLeft"){e.preventDefault();clickDisc(-1);}
-    if(e.code==="KeyN"){e.preventDefault();nextHoleHotkey();}
-    if(e.code==="KeyF"){e.preventDefault();toggleBigScreen();}
-  });
-
-  // Watch simulator state so the 3D tee camera follows each lie/hole.
-  const stateWatcher=setInterval(syncCourse3D,350);
-
-  // Animate every simulator throw on the 3D course without changing the existing physics.
-  const throwButton3d = document.querySelector("#throw-button");
-  if (throwButton3d) {
-    throwButton3d.addEventListener("click", () => {
-      const before=(typeof currentLie!=="undefined"&&currentLie)?{...currentLie}:{lateral:0,downrange:0};
-      setTimeout(() => {
-        const after=(typeof currentLie!=="undefined"&&currentLie)?{...currentLie}:before;
-        animateVirtualThrow(
-          feetToWorld(before.lateral||0), feetToWorld(before.downrange||0),
-          feetToWorld(after.lateral||0), feetToWorld(after.downrange||0)
-        );
-      }, 30);
-    });
-  }
-
-  // Camera-triggered throws call throwDisc directly, so observe lie changes too.
-  let observedLie = (typeof currentLie!=="undefined"&&currentLie)
-    ? {lateral:currentLie.lateral||0,downrange:currentLie.downrange||0}
-    : {lateral:0,downrange:0};
-  setInterval(() => {
-    if (typeof currentLie==="undefined" || !currentLie || flightAnimation) return;
-    const nowLie={lateral:currentLie.lateral||0,downrange:currentLie.downrange||0};
-    if (Math.abs(nowLie.lateral-observedLie.lateral)>.01 ||
-        Math.abs(nowLie.downrange-observedLie.downrange)>.01) {
-      const before=observedLie;
-      observedLie={...nowLie};
-      animateVirtualThrow(
-        feetToWorld(before.lateral),feetToWorld(before.downrange),
-        feetToWorld(nowLie.lateral),feetToWorld(nowLie.downrange)
-      );
-    }
-  }, 80);
-
-
-  init3D();
-  setTimeout(syncCourse3D,100);
+  lastLie=lieSafe();
+  setInterval(()=>{
+    const l=lieSafe();
+    if(!anim&&(Math.abs(l.lateral-lastLie.lateral)>.01||Math.abs(l.downrange-lastLie.downrange)>.01)){
+      const b={...lastLie};lastLie={...l};fly(b,l);
+    } else if(!anim) draw();
+  },100);
+  window.addEventListener("resize",resize);
+  resize();
 })();

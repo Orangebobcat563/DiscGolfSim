@@ -481,3 +481,8 @@ body.sim-big-screen .stats-grid { font-size:1.05rem; }
  .wii-disc-corner{min-width:0;width:calc(100% - 32px)}
  .wii-hotkey-help{display:none}
 }
+
+.wii-last-throw{margin-top:8px;padding-top:7px;border-top:1px solid rgba(24,50,71,.22);display:flex;flex-direction:column;gap:2px}
+.wii-last-throw small{font-size:.58rem;font-weight:900;letter-spacing:.09em;opacity:.68}
+.wii-last-throw strong{font-size:.82rem}
+.wii-last-throw span{font-size:.68rem;opacity:.78}

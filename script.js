@@ -2143,7 +2143,7 @@ if (cameraApiAvailable) {
   const miniCtx=miniCanvas?.getContext("2d");
   const hudName=document.querySelector("#hud-disc-name");
   const hudNums=["speed","glide","turn","fade"].map(k=>document.querySelector("#hud-"+k));
-  let dpr=1, anim=null, visualDisc=null, lastLie={lateral:0,downrange:0};
+  let dpr=1, anim=null, visualDisc=null, lastLie={lateral:0,downrange:0}, displayLie={lateral:0,downrange:0};
 
   function holeSafe(){ try{return typeof currentHole==="function"?currentHole():null}catch(_){return null} }
   function lieSafe(){ try{return currentLie?{lateral:currentLie.lateral||0,downrange:currentLie.downrange||0}:{lateral:0,downrange:0}}catch(_){return {lateral:0,downrange:0}} }
@@ -2155,12 +2155,33 @@ if (cameraApiAvailable) {
   function project(lateral, forward, height=0){
     const w=canvas.clientWidth,h=canvas.clientHeight;
     const depth=Math.max(0,forward);
-    const t=Math.min(1,depth/300);
+    const t=Math.min(1.35,depth/300);
     const horizon=h*.31, bottom=h*.92;
     const y=bottom-(bottom-horizon)*(1-Math.exp(-depth/105))-height*(1.4-t*.7);
     const spread=(w*.42)*(1-t*.76);
     const x=w/2+(lateral/55)*spread;
     return {x,y,scale:Math.max(.18,1-t*.78)};
+  }
+
+  const COURSE_LAYOUTS = [
+    {name:"Opening Lane", bend:0, width:42, trees:"both", feature:"open"},
+    {name:"Pine Gap", bend:-18, width:30, trees:"both", feature:"gap"},
+    {name:"Long Meadow", bend:10, width:52, trees:"sparse", feature:"meadow"},
+    {name:"Left Bend", bend:-34, width:34, trees:"right", feature:"dogleg-left"},
+    {name:"Creek Run", bend:20, width:32, trees:"both", feature:"creek"},
+    {name:"Big Drive", bend:0, width:58, trees:"sparse", feature:"long"},
+    {name:"Right Window", bend:32, width:30, trees:"left", feature:"dogleg-right"},
+    {name:"Uphill Finish", bend:-12, width:38, trees:"both", feature:"uphill"},
+    {name:"Home Stretch", bend:16, width:40, trees:"both", feature:"finish"}
+  ];
+  function layoutSafe(){
+    const i=typeof currentHoleIndex==="number"?currentHoleIndex:0;
+    return COURSE_LAYOUTS[Math.max(0,Math.min(COURSE_LAYOUTS.length-1,i))];
+  }
+  function centerAt(z,total){
+    const L=layoutSafe(), p=Math.max(0,Math.min(1,z/Math.max(1,total)));
+    // Smooth dogleg: little movement early, strongest bend in middle/late fairway.
+    return L.bend*(p*p*(3-2*p));
   }
   function tree(x,z){
     const p=project(x,z),s=p.scale;
@@ -2168,8 +2189,8 @@ if (cameraApiAvailable) {
     ctx.fillStyle="#28623a";
     ctx.beginPath();ctx.moveTo(p.x,p.y-70*s);ctx.lineTo(p.x-22*s,p.y-22*s);ctx.lineTo(p.x+22*s,p.y-22*s);ctx.closePath();ctx.fill();
   }
-  function basket(z){
-    const p=project(0,z),s=Math.max(.35,p.scale);
+  function basket(z,lateral=0){
+    const p=project(lateral,z),s=Math.max(.35,p.scale);
     ctx.strokeStyle="#e5e7eb";ctx.lineWidth=Math.max(2,3*s);
     ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(p.x,p.y-55*s);ctx.stroke();
     ctx.fillStyle="#ffd43b";ctx.fillRect(p.x-18*s,p.y-52*s,36*s,7*s);
@@ -2182,19 +2203,74 @@ if (cameraApiAvailable) {
   function draw(){
     const w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h)return;
     const hole=holeSafe()||{distance:300,par:3,name:"Hole"};
-    const lie=lieSafe(), remaining=Math.max(1,(hole.distance||300)-lie.downrange);
+    const lie=displayLie, rawRemaining=(hole.distance||300)-lie.downrange;
+    const overthrown=rawRemaining<0, remaining=Math.max(1,Math.abs(rawRemaining));
     const sky=ctx.createLinearGradient(0,0,0,h*.55);sky.addColorStop(0,"#79bde8");sky.addColorStop(1,"#d9effb");ctx.fillStyle=sky;ctx.fillRect(0,0,w,h);
     // Soft clouds and rolling hills for a Wii Sports Golf-like bright course feel.
     ctx.fillStyle="rgba(255,255,255,.78)";
     for(const c of [[.18,.14,34],[.25,.12,25],[.72,.17,30],[.79,.15,22]]){ctx.beginPath();ctx.arc(w*c[0],h*c[1],c[2],0,Math.PI*2);ctx.fill()}
     ctx.fillStyle="#5f9253";ctx.beginPath();ctx.moveTo(0,h*.34);ctx.quadraticCurveTo(w*.18,h*.22,w*.36,h*.34);ctx.quadraticCurveTo(w*.56,h*.20,w*.72,h*.34);ctx.quadraticCurveTo(w*.88,h*.25,w,h*.34);ctx.lineTo(w,h*.48);ctx.lineTo(0,h*.48);ctx.closePath();ctx.fill();
     ctx.fillStyle="#467b42";ctx.fillRect(0,h*.30,w,h*.70);
-    // perspective fairway
-    ctx.fillStyle="#73ad58";ctx.beginPath();ctx.moveTo(w*.43,h*.30);ctx.lineTo(w*.57,h*.30);ctx.lineTo(w*.91,h);ctx.lineTo(w*.09,h);ctx.closePath();ctx.fill();
-    // tee/lie line
+    
+    // Hole-specific terrain/background. These intentionally look different hole-to-hole.
+    const terrain=layoutSafe().feature;
+    if(terrain==="gap"){
+      ctx.fillStyle="#315f36";
+      ctx.fillRect(0,h*.30,w*.17,h*.70); ctx.fillRect(w*.83,h*.30,w*.17,h*.70);
+    }else if(terrain==="meadow"){
+      ctx.fillStyle="rgba(245,214,83,.42)";
+      for(let x=18;x<w;x+=38){ctx.beginPath();ctx.arc(x,h*.72+(x%4)*18,4,0,Math.PI*2);ctx.fill()}
+    }else if(terrain==="dogleg-left"){
+      ctx.fillStyle="#355f32";ctx.beginPath();ctx.ellipse(w*.78,h*.58,w*.22,h*.22,0,0,Math.PI*2);ctx.fill();
+    }else if(terrain==="creek"){
+      ctx.fillStyle="rgba(66,151,205,.65)";ctx.fillRect(0,h*.59,w,h*.055);
+    }else if(terrain==="long"){
+      ctx.fillStyle="rgba(224,196,113,.28)";ctx.fillRect(0,h*.70,w,h*.30);
+    }else if(terrain==="dogleg-right"){
+      ctx.fillStyle="#355f32";ctx.beginPath();ctx.ellipse(w*.22,h*.58,w*.22,h*.22,0,0,Math.PI*2);ctx.fill();
+    }else if(terrain==="uphill"){
+      ctx.fillStyle="#568a48";ctx.beginPath();ctx.moveTo(0,h*.70);ctx.quadraticCurveTo(w*.5,h*.43,w,h*.70);ctx.lineTo(w,h);ctx.lineTo(0,h);ctx.closePath();ctx.fill();
+    }else if(terrain==="finish"){
+      ctx.fillStyle="rgba(45,104,57,.5)";
+      ctx.beginPath();ctx.ellipse(w*.12,h*.52,w*.16,h*.22,0,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.ellipse(w*.88,h*.55,w*.14,h*.20,0,0,Math.PI*2);ctx.fill();
+    }
+
+// Curved fairway: each of the 9 holes has its own width/bend/layout.
+    const layout=layoutSafe(), total=Math.max(remaining,40);
+    ctx.fillStyle="#73ad58";
+    const leftPts=[],rightPts=[];
+    for(let z=0;z<=Math.min(total,420);z+=10){
+      const c=centerAt(z,total), half=layout.width/2;
+      leftPts.push(project(c-half,z)); rightPts.push(project(c+half,z));
+    }
+    ctx.beginPath();
+    rightPts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
+    leftPts.reverse().forEach(p=>ctx.lineTo(p.x,p.y));ctx.closePath();ctx.fill();
+
+    // Unique hole feature accents.
+    if(layout.feature==="creek"){
+      const z=total*.58,c=centerAt(z,total),p=project(c,z);
+      ctx.strokeStyle="#4fa9d8";ctx.lineWidth=Math.max(5,18*p.scale);
+      ctx.beginPath();ctx.moveTo(p.x-80*p.scale,p.y);ctx.quadraticCurveTo(p.x,p.y+10*p.scale,p.x+80*p.scale,p.y-3*p.scale);ctx.stroke();
+    }
+    if(layout.feature==="uphill"){
+      const p=project(centerAt(total*.72,total),total*.72);
+      ctx.fillStyle="rgba(80,120,64,.42)";ctx.beginPath();ctx.ellipse(p.x,p.y+12,90*p.scale,28*p.scale,0,0,Math.PI*2);ctx.fill();
+    }
+
     ctx.strokeStyle="rgba(255,255,255,.55)";ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(w*.38,h*.91);ctx.lineTo(w*.62,h*.91);ctx.stroke();
-    for(let z=18;z<Math.min(remaining,300);z+=20){tree(-34-(z%17)*.35,z);tree(34+(z%13)*.35,z);}
-    basket(Math.min(remaining,300));
+
+    for(let z=18;z<Math.min(Math.max(total,40),420);z+=20){
+      const c=centerAt(z,total), half=layout.width/2;
+      if(layout.trees!=="right" && (layout.trees!=="sparse" || z%40===18)) tree(c-half-10-(z%9),z);
+      if(layout.trees!=="left" && (layout.trees!=="sparse" || z%40===18)) tree(c+half+10+(z%7),z);
+    }
+    // Pine Gap gets a tighter visual window near the middle.
+    if(layout.feature==="gap"){
+      const z=total*.48,c=centerAt(z,total);tree(c-14,z);tree(c+14,z);
+    }
+    basket(remaining, centerAt(remaining,total));
     const d=visualDisc || {lateral:0,forward:0,height:1.2};
     const dp=project(d.lateral,d.forward,d.height);
     ctx.save();ctx.translate(dp.x,dp.y);ctx.rotate(d.roll||0);
@@ -2202,7 +2278,9 @@ if (cameraApiAvailable) {
     ctx.strokeStyle="#fff";ctx.lineWidth=1.5;ctx.stroke();ctx.restore();
     const hi=document.querySelector("#wii-hole-label"),di=document.querySelector("#wii-distance-label");
     if(hi)hi.textContent=`HOLE ${(typeof currentHoleIndex==="number"?currentHoleIndex:0)+1} · ${hole.name||""}`;
-    if(di)di.textContent=`${Math.round(remaining)} FT LEFT · PAR ${hole.par||3}`;
+    if(di)di.textContent=overthrown
+      ? `${Math.round(remaining)} FT PAST PIN · PAR ${hole.par||3}`
+      : `${Math.round(remaining)} FT LEFT · PAR ${hole.par||3}`;
     drawMiniMap();
     updateDiscHud();
   }
@@ -2215,7 +2293,15 @@ if (cameraApiAvailable) {
       const t=Math.min(1,(now-start)/dur),e=t*t*(3-2*t);
       visualDisc={lateral:dx*e,forward:Math.max(0,dz*e),height:1.2+Math.sin(Math.PI*t)*Math.min(18,4+Math.abs(dz)*.045),roll:t*12};
       draw();
-      if(t<1)anim=requestAnimationFrame(frame);else{anim=null;visualDisc=null;draw();}
+      if(t<1){
+        anim=requestAnimationFrame(frame);
+      }else{
+        anim=null;
+        visualDisc=null;
+        displayLie={...after};
+        lastLie={...after};
+        draw();
+      }
     } anim=requestAnimationFrame(frame);
   }
 
@@ -2250,22 +2336,27 @@ if (cameraApiAvailable) {
     const W=Math.max(1,Math.round(r.width*ratio)),H=Math.max(1,Math.round(r.height*ratio));
     if(miniCanvas.width!==W||miniCanvas.height!==H){miniCanvas.width=W;miniCanvas.height=H}
     miniCtx.setTransform(ratio,0,0,ratio,0,0);
-    const w=r.width,h=r.height,hole=holeSafe()||{distance:300},lie=lieSafe();
+    const w=r.width,h=r.height,hole=holeSafe()||{distance:300},lie=displayLie;
     miniCtx.clearRect(0,0,w,h);miniCtx.fillStyle="#dfead5";miniCtx.fillRect(0,0,w,h);
-    // Top-down fairway ribbon.
-    miniCtx.fillStyle="#77ad59";miniCtx.beginPath();
-    miniCtx.moveTo(w*.36,h*.94);miniCtx.bezierCurveTo(w*.18,h*.68,w*.68,h*.48,w*.42,h*.08);
-    miniCtx.lineTo(w*.62,h*.08);miniCtx.bezierCurveTo(w*.86,h*.48,w*.36,h*.68,w*.64,h*.94);miniCtx.closePath();miniCtx.fill();
-    // Basket.
-    miniCtx.fillStyle="#ffd43b";miniCtx.beginPath();miniCtx.arc(w*.52,h*.075,6,0,Math.PI*2);miniCtx.fill();
-    miniCtx.strokeStyle="#4b6170";miniCtx.lineWidth=2;miniCtx.beginPath();miniCtx.moveTo(w*.52,h*.075);miniCtx.lineTo(w*.52,h*.13);miniCtx.stroke();
-    // Player/current lie based on downrange.
-    const progress=Math.max(0,Math.min(1,(lie.downrange||0)/(hole.distance||300)));
+    // Top-down map uses the same unique bend as the main course.
+    const L=layoutSafe(), hd=hole.distance||300;
+    const mapX=(z)=>w*.50+(centerAt(z,hd)/70)*w*.62;
+    const mapY=(z)=>h*.92-(z/hd)*h*.82;
+    miniCtx.fillStyle="#77ad59";miniCtx.strokeStyle="#77ad59";miniCtx.lineWidth=Math.max(18,L.width*.55);miniCtx.lineCap="round";
+    miniCtx.beginPath();
+    for(let z=0;z<=hd;z+=10){const x=mapX(z),y=mapY(z);if(z===0)miniCtx.moveTo(x,y);else miniCtx.lineTo(x,y)}
+    miniCtx.stroke();
+    // Basket follows the dogleg endpoint.
+    const bx=mapX(hd),by=mapY(hd);
+    miniCtx.fillStyle="#ffd43b";miniCtx.beginPath();miniCtx.arc(bx,by,6,0,Math.PI*2);miniCtx.fill();
+    miniCtx.strokeStyle="#4b6170";miniCtx.lineWidth=2;miniCtx.beginPath();miniCtx.moveTo(bx,by);miniCtx.lineTo(bx,by+10);miniCtx.stroke();
+    // Player/current lie can pass beyond the basket; don't clamp overthrows to the pin.
+    const progress=(lie.downrange||0)/hd;
     const py=h*.92-progress*h*.82;
-    const px=w*.50+Math.max(-w*.23,Math.min(w*.23,(lie.lateral||0)*1.2));
+    const px=mapX(Math.min(hd,Math.max(0,lie.downrange||0)))+Math.max(-w*.23,Math.min(w*.23,(lie.lateral||0)*1.2));
     miniCtx.fillStyle="#ffffff";miniCtx.strokeStyle="#244c67";miniCtx.lineWidth=2;
     miniCtx.beginPath();miniCtx.arc(px,py,6,0,Math.PI*2);miniCtx.fill();miniCtx.stroke();
-    miniCtx.strokeStyle="rgba(36,76,103,.55)";miniCtx.setLineDash([4,4]);miniCtx.beginPath();miniCtx.moveTo(px,py);miniCtx.lineTo(w*.52,h*.075);miniCtx.stroke();miniCtx.setLineDash([]);
+    miniCtx.strokeStyle="rgba(36,76,103,.55)";miniCtx.setLineDash([4,4]);miniCtx.beginPath();miniCtx.moveTo(px,py);miniCtx.lineTo(bx,by);miniCtx.stroke();miniCtx.setLineDash([]);
   }
   function clickDisc(delta){
     const opts=visibleDiscOptions();
@@ -2289,11 +2380,32 @@ if (cameraApiAvailable) {
     if(e.code==="KeyN"){e.preventDefault();nextHoleKey()}
     if(e.code==="KeyF"){e.preventDefault();big()}
   });
-  lastLie=lieSafe();
+  lastLie=lieSafe(); displayLie={...lastLie};
   setInterval(()=>{
     const l=lieSafe();
     if(!anim&&(Math.abs(l.lateral-lastLie.lateral)>.01||Math.abs(l.downrange-lastLie.downrange)>.01)){
-      const b={...lastLie};lastLie={...l};fly(b,l);
+      const b={...displayLie};
+      lastLie={...l};
+
+      // Update monitor HUD with the throw that just produced this landing position.
+      const lastMain=document.querySelector("#last-throw-main");
+      const lastDetail=document.querySelector("#last-throw-detail");
+      const throwFeet=Math.round(Math.hypot(
+        (l.downrange||0)-(b.downrange||0),
+        (l.lateral||0)-(b.lateral||0)
+      ));
+      if(lastMain) lastMain.textContent=`${throwFeet} ft`;
+      if(lastDetail){
+        let mph="—", aim="—", angle="—";
+        try{
+          mph=controls?.speed?.value ?? "—";
+          aim=Number(controls?.aim?.value ?? 0).toFixed(1)+"°";
+          const a=Number(controls?.hyzer?.value ?? 0);
+          angle=a===0?"Flat":`${Math.abs(a).toFixed(1)}° ${a<0?"Hyzer":"Anhyzer"}`;
+        }catch(_){}
+        lastDetail.textContent=`${mph} mph · Aim ${aim} · ${angle}`;
+      }
+      fly(b,l);
     } else if(!anim) draw();
   },100);
   window.addEventListener("resize",resize);

@@ -558,6 +558,7 @@ let recentThrowSpeeds = [];
 let lastCamera2Detection = null;
 let camera2AimDegrees = null;
 let camera2HyzerDegrees = null;
+let smoothedCamera2HyzerDegrees = 0;
 let camera2Roundness = null;
 let camera2MeasurementAt = -Infinity;
 let camera2LastSeenAt = -Infinity;
@@ -601,7 +602,7 @@ function triggerThrowFromDiscDetection(timestamp) {
       ));
     }
 
-    const camera2IsFresh = now - camera2MeasurementAt < 900;
+    const camera2IsFresh = now - camera2MeasurementAt < 1600;
     if (camera2IsFresh && Number.isFinite(camera2AimDegrees)) {
       controls.aim.value = String(Math.round(
         Math.max(Number(controls.aim.min),
@@ -743,12 +744,38 @@ function recordCamera2Throw(sourceX, sourceY, timestamp, region) {
         while (orientation < -90) orientation += 180;
 
         // Near-round discs do not have a trustworthy orientation, so call them flat.
-        if (roundness > 0.92 || tiltMagnitude < 8) {
-          camera2HyzerDegrees = 0;
+        // Camera 2 is on the ground looking upward. That perspective makes even
+        // a flat disc look somewhat tilted/elliptical, so subtract a small
+        // perspective baseline before treating the shape as real hyzer/anhyzer.
+        const groundCameraBaseline = 7;
+        const correctedTiltMagnitude = Math.max(0, tiltMagnitude - groundCameraBaseline);
+
+        if (roundness > 0.90 || correctedTiltMagnitude < 5) {
+          // Stronger flat-zone for the low/upward camera view.
+          smoothedCamera2HyzerDegrees *= 0.48;
+          if (Math.abs(smoothedCamera2HyzerDegrees) < 3) {
+            smoothedCamera2HyzerDegrees = 0;
+          }
         } else {
           const sign = orientation >= 0 ? 1 : -1;
-          camera2HyzerDegrees = Math.max(-45, Math.min(45, sign * tiltMagnitude));
+
+          // Once the tilt clears the ground-camera flat zone, make intentional
+          // hyzer/anhyzer clear without exaggerating extreme readings.
+          const detectedHyzer = Math.max(
+            -40,
+            Math.min(40, sign * correctedTiltMagnitude * 1.18)
+          );
+
+          // Favor the recent frames as the disc approaches Camera 2, while still
+          // smoothing enough to reject a single blurry frame.
+          smoothedCamera2HyzerDegrees =
+            smoothedCamera2HyzerDegrees * 0.52 + detectedHyzer * 0.48;
         }
+
+        camera2HyzerDegrees = Math.max(
+          -40,
+          Math.min(40, smoothedCamera2HyzerDegrees)
+        );
       }
 
       camera2MeasurementAt = timestamp;
@@ -2104,3 +2131,218 @@ if (cameraApiAvailable) {
   );
   updateCameraButtons();
 }
+
+
+/* ===== 3D COURSE + MONITOR HOTKEYS ===== */
+(() => {
+  const canvas = document.querySelector("#course-3d-canvas");
+  const bigScreenButton = document.querySelector("#big-screen-button");
+  if (!canvas) return;
+
+  let scene, camera3d, renderer, discMesh, basketGroup, lieMarker;
+  let flightAnimation = null;
+  let lastRenderedHole = -1;
+  let lastLieX = 0, lastLieZ = 0;
+
+  function getHoleSafe() {
+    try { return typeof currentHole === "function" ? currentHole() : null; } catch (_) { return null; }
+  }
+
+  function init3D() {
+    if (!window.THREE) {
+      const shell = document.querySelector("#wii-course-shell");
+      if (shell) shell.style.background = "linear-gradient(#87c9f4 0 55%, #76a95a 55% 100%)";
+      return;
+    }
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x91cef2);
+    scene.fog = new THREE.Fog(0x91cef2, 85, 235);
+
+    camera3d = new THREE.PerspectiveCamera(58, 1, 0.1, 500);
+    renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.shadowMap.enabled = true;
+
+    scene.add(new THREE.HemisphereLight(0xeaf7ff, 0x557744, 2.1));
+    const sun = new THREE.DirectionalLight(0xffffff, 2.0);
+    sun.position.set(-30, 55, -20); sun.castShadow = true; scene.add(sun);
+
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(150, 330),
+      new THREE.MeshStandardMaterial({ color:0x5d9b4b, roughness:1 })
+    );
+    ground.rotation.x = -Math.PI/2; ground.position.z = 110; ground.receiveShadow=true; scene.add(ground);
+
+    // Fairway stripe
+    const fairway = new THREE.Mesh(
+      new THREE.PlaneGeometry(42, 290),
+      new THREE.MeshStandardMaterial({ color:0x79b85e, roughness:1 })
+    );
+    fairway.rotation.x=-Math.PI/2; fairway.position.set(0,.015,115); scene.add(fairway);
+
+    // Simple trees lining both sides.
+    const trunkMat = new THREE.MeshStandardMaterial({color:0x6f4b2d});
+    const leafMat = new THREE.MeshStandardMaterial({color:0x2f7139});
+    for (let z=0; z<270; z+=18) {
+      for (const side of [-1,1]) {
+        const x = side * (27 + ((z*7)%13));
+        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(.8,1,7,8),trunkMat);
+        trunk.position.set(x,3.5,z); scene.add(trunk);
+        const crown = new THREE.Mesh(new THREE.ConeGeometry(5.5,13,10),leafMat);
+        crown.position.set(x,12,z); scene.add(crown);
+      }
+    }
+
+    basketGroup = new THREE.Group();
+    const poleMat = new THREE.MeshStandardMaterial({color:0xc9c9c9, metalness:.55, roughness:.35});
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(.12,.12,4.8,10),poleMat); pole.position.y=2.4;
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(1.05,1.05,.28,20),new THREE.MeshStandardMaterial({color:0xf2c94c}));
+    band.position.y=4.25;
+    const tray = new THREE.Mesh(new THREE.CylinderGeometry(1.25,.8,.3,20),poleMat); tray.position.y=1.75;
+    basketGroup.add(pole,band,tray); scene.add(basketGroup);
+
+    discMesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(.55,.55,.12,24),
+      new THREE.MeshStandardMaterial({color:0xff6b35, roughness:.45})
+    );
+    discMesh.rotation.x=Math.PI/2; discMesh.position.y=1.25; discMesh.castShadow=true; scene.add(discMesh);
+
+    lieMarker = new THREE.Mesh(
+      new THREE.RingGeometry(.7,1.0,24),
+      new THREE.MeshBasicMaterial({color:0xffffff, side:THREE.DoubleSide})
+    );
+    lieMarker.rotation.x=-Math.PI/2; lieMarker.position.y=.04; scene.add(lieMarker);
+
+    resize3D();
+    render3D();
+    window.addEventListener("resize", resize3D);
+  }
+
+  function feetToWorld(ft) { return ft * 0.62; }
+
+  function syncCourse3D() {
+    if (!scene) return;
+    const hole = getHoleSafe();
+    const idx = typeof currentHoleIndex === "number" ? currentHoleIndex : 0;
+    const distance = hole?.distance || 300;
+    const par = hole?.par || 3;
+    const lie = (typeof currentLie !== "undefined" && currentLie) ? currentLie : {lateral:0,downrange:0};
+
+    const basketZ = feetToWorld(distance);
+    basketGroup.position.set(0,0,basketZ);
+    const lieX = feetToWorld(lie.lateral || 0);
+    const lieZ = feetToWorld(lie.downrange || 0);
+    lieMarker.position.set(lieX,.04,lieZ);
+
+    if (!flightAnimation) discMesh.position.set(lieX,1.25,lieZ);
+
+    const remaining = Math.max(0, distance - (lie.downrange || 0));
+    camera3d.position.set(lieX + 0.3, 5.2, lieZ - 9.5);
+    camera3d.lookAt(lieX, 2.0, Math.min(basketZ, lieZ + 42));
+
+    const holeLabel=document.querySelector("#wii-hole-label");
+    const distLabel=document.querySelector("#wii-distance-label");
+    const discLabel=document.querySelector("#wii-disc-label");
+    if (holeLabel) holeLabel.textContent=`HOLE ${idx+1} · ${hole?.name || ""}`;
+    if (distLabel) distLabel.textContent=`${Math.round(remaining)} FT LEFT · PAR ${par}`;
+    if (discLabel) {
+      const selected = document.querySelector(".disc-option.selected, .disc-card.selected, [aria-pressed='true'][data-disc]");
+      discLabel.textContent = selected?.textContent?.trim()?.split("\n")[0] || "DISC";
+    }
+    lastRenderedHole=idx; lastLieX=lieX; lastLieZ=lieZ;
+    render3D();
+  }
+
+  function animateVirtualThrow(fromX, fromZ, toX, toZ) {
+    if (!scene || !discMesh) return;
+    if (flightAnimation) cancelAnimationFrame(flightAnimation);
+    const start=performance.now(), duration=1050;
+    function frame(now) {
+      const t=Math.min(1,(now-start)/duration);
+      const ease=t*t*(3-2*t);
+      discMesh.position.x=fromX+(toX-fromX)*ease;
+      discMesh.position.z=fromZ+(toZ-fromZ)*ease;
+      discMesh.position.y=1.2 + Math.sin(Math.PI*t) * Math.min(10, 3 + Math.abs(toZ-fromZ)*.05);
+      discMesh.rotation.z += .22;
+      render3D();
+      if(t<1) flightAnimation=requestAnimationFrame(frame);
+      else { flightAnimation=null; syncCourse3D(); }
+    }
+    flightAnimation=requestAnimationFrame(frame);
+  }
+
+  function render3D(){ if(renderer&&scene&&camera3d) renderer.render(scene,camera3d); }
+  function resize3D(){
+    if(!renderer||!camera3d) return;
+    const r=canvas.getBoundingClientRect();
+    renderer.setSize(Math.max(1,r.width),Math.max(1,r.height),false);
+    camera3d.aspect=Math.max(1,r.width)/Math.max(1,r.height); camera3d.updateProjectionMatrix(); render3D();
+  }
+
+  function clickDisc(delta) {
+    const options=[...document.querySelectorAll(".disc-option, .disc-card, [data-disc]")].filter(el => el.offsetParent !== null);
+    if (!options.length) return;
+    let i=options.findIndex(el=>el.classList.contains("selected") || el.getAttribute("aria-pressed")==="true" || el.checked);
+    if(i<0)i=0;
+    options[(i+delta+options.length)%options.length].click();
+    setTimeout(syncCourse3D,20);
+  }
+
+  function nextHoleHotkey() {
+    const candidates=[...document.querySelectorAll("button")];
+    const b=candidates.find(x=>/next hole/i.test(x.textContent));
+    if(b && !b.disabled) b.click();
+    else if (typeof nextHole === "function") nextHole();
+    setTimeout(syncCourse3D,30);
+  }
+
+  async function toggleBigScreen() {
+    document.body.classList.toggle("sim-big-screen");
+    const on=document.body.classList.contains("sim-big-screen");
+    bigScreenButton.textContent=on ? "✕ EXIT BIG SCREEN" : "⛶ BIG SCREEN";
+    try {
+      if(on && document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
+      else if(!on && document.fullscreenElement) await document.exitFullscreen();
+    } catch (_) {}
+    setTimeout(resize3D,80);
+  }
+
+  bigScreenButton?.addEventListener("click",toggleBigScreen);
+  document.addEventListener("fullscreenchange",()=>{
+    if(!document.fullscreenElement && document.body.classList.contains("sim-big-screen")){
+      document.body.classList.remove("sim-big-screen");
+      if(bigScreenButton) bigScreenButton.textContent="⛶ BIG SCREEN";
+      setTimeout(resize3D,50);
+    }
+  });
+
+  document.addEventListener("keydown",(e)=>{
+    const tag=e.target?.tagName?.toLowerCase();
+    if(["input","textarea","select"].includes(tag)) return;
+    if(e.code==="ArrowRight"){e.preventDefault();clickDisc(1);}
+    if(e.code==="ArrowLeft"){e.preventDefault();clickDisc(-1);}
+    if(e.code==="KeyN"){e.preventDefault();nextHoleHotkey();}
+    if(e.code==="KeyF"){e.preventDefault();toggleBigScreen();}
+  });
+
+  // Watch simulator state so the 3D tee camera follows each lie/hole.
+  const stateWatcher=setInterval(syncCourse3D,350);
+
+  // Wrap the existing throw function without changing its camera/speed logic.
+  if (typeof throwDisc === "function") {
+    const originalThrowDisc=throwDisc;
+    throwDisc=function(...args){
+      const before=(typeof currentLie!=="undefined"&&currentLie)?{...currentLie}:{lateral:0,downrange:0};
+      const result=originalThrowDisc.apply(this,args);
+      setTimeout(()=>{
+        const after=(typeof currentLie!=="undefined"&&currentLie)?{...currentLie}:before;
+        animateVirtualThrow(feetToWorld(before.lateral||0),feetToWorld(before.downrange||0),
+                            feetToWorld(after.lateral||0),feetToWorld(after.downrange||0));
+      },25);
+      return result;
+    };
+  }
+
+  init3D();
+  setTimeout(syncCourse3D,100);
+})();

@@ -2195,17 +2195,30 @@ if (cameraApiAvailable) {
 
     basketGroup = new THREE.Group();
     const poleMat = new THREE.MeshStandardMaterial({color:0xc9c9c9, metalness:.55, roughness:.35});
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(.12,.12,4.8,10),poleMat); pole.position.y=2.4;
-    const band = new THREE.Mesh(new THREE.CylinderGeometry(1.05,1.05,.28,20),new THREE.MeshStandardMaterial({color:0xf2c94c}));
-    band.position.y=4.25;
-    const tray = new THREE.Mesh(new THREE.CylinderGeometry(1.25,.8,.3,20),poleMat); tray.position.y=1.75;
-    basketGroup.add(pole,band,tray); scene.add(basketGroup);
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(.14,.14,5.4,10),poleMat); pole.position.y=2.7;
+    const yellowMat = new THREE.MeshStandardMaterial({color:0xffd43b, roughness:.4});
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(1.3,1.3,.4,24),yellowMat); band.position.y=4.55;
+    const tray = new THREE.Mesh(new THREE.CylinderGeometry(1.45,.9,.4,24),poleMat); tray.position.y=1.82;
+    basketGroup.add(pole,band,tray);
+    for(let i=0;i<12;i++){
+      const a=i/12*Math.PI*2;
+      const chain=new THREE.Mesh(new THREE.CylinderGeometry(.028,.028,2.35,5),poleMat);
+      chain.position.set(Math.cos(a)*.8,3.15,Math.sin(a)*.8);
+      basketGroup.add(chain);
+    }
+    const flagPole=new THREE.Mesh(new THREE.CylinderGeometry(.04,.04,3.2,6),poleMat); flagPole.position.y=6.2;
+    const flag=new THREE.Mesh(new THREE.PlaneGeometry(1.6,.8),new THREE.MeshStandardMaterial({color:0xffd43b,side:THREE.DoubleSide}));
+    flag.position.set(.8,7.25,0);
+    basketGroup.add(flagPole,flag);
+    scene.add(basketGroup);
 
     discMesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(.55,.55,.12,24),
-      new THREE.MeshStandardMaterial({color:0xff6b35, roughness:.45})
+      new THREE.CylinderGeometry(.78,.78,.12,32),
+      new THREE.MeshStandardMaterial({color:0xff5a2f, roughness:.35, emissive:0x2a0802})
     );
-    discMesh.rotation.x=Math.PI/2; discMesh.position.y=1.25; discMesh.castShadow=true; scene.add(discMesh);
+    discMesh.position.y=1.35;
+    discMesh.castShadow=true;
+    scene.add(discMesh);
 
     lieMarker = new THREE.Mesh(
       new THREE.RingGeometry(.7,1.0,24),
@@ -2328,20 +2341,39 @@ if (cameraApiAvailable) {
   // Watch simulator state so the 3D tee camera follows each lie/hole.
   const stateWatcher=setInterval(syncCourse3D,350);
 
-  // Wrap the existing throw function without changing its camera/speed logic.
-  if (typeof throwDisc === "function") {
-    const originalThrowDisc=throwDisc;
-    throwDisc=function(...args){
+  // Animate every simulator throw on the 3D course without changing the existing physics.
+  const throwButton3d = document.querySelector("#throw-button");
+  if (throwButton3d) {
+    throwButton3d.addEventListener("click", () => {
       const before=(typeof currentLie!=="undefined"&&currentLie)?{...currentLie}:{lateral:0,downrange:0};
-      const result=originalThrowDisc.apply(this,args);
-      setTimeout(()=>{
+      setTimeout(() => {
         const after=(typeof currentLie!=="undefined"&&currentLie)?{...currentLie}:before;
-        animateVirtualThrow(feetToWorld(before.lateral||0),feetToWorld(before.downrange||0),
-                            feetToWorld(after.lateral||0),feetToWorld(after.downrange||0));
-      },25);
-      return result;
-    };
+        animateVirtualThrow(
+          feetToWorld(before.lateral||0), feetToWorld(before.downrange||0),
+          feetToWorld(after.lateral||0), feetToWorld(after.downrange||0)
+        );
+      }, 30);
+    });
   }
+
+  // Camera-triggered throws call throwDisc directly, so observe lie changes too.
+  let observedLie = (typeof currentLie!=="undefined"&&currentLie)
+    ? {lateral:currentLie.lateral||0,downrange:currentLie.downrange||0}
+    : {lateral:0,downrange:0};
+  setInterval(() => {
+    if (typeof currentLie==="undefined" || !currentLie || flightAnimation) return;
+    const nowLie={lateral:currentLie.lateral||0,downrange:currentLie.downrange||0};
+    if (Math.abs(nowLie.lateral-observedLie.lateral)>.01 ||
+        Math.abs(nowLie.downrange-observedLie.downrange)>.01) {
+      const before=observedLie;
+      observedLie={...nowLie};
+      animateVirtualThrow(
+        feetToWorld(before.lateral),feetToWorld(before.downrange),
+        feetToWorld(nowLie.lateral),feetToWorld(nowLie.downrange)
+      );
+    }
+  }, 80);
+
 
   init3D();
   setTimeout(syncCourse3D,100);

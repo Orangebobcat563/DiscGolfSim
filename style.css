@@ -433,3 +433,9 @@ body.sim-big-screen .stats-grid { font-size:1.05rem; }
   .wii-course-shell { height:390px; }
   .wii-hotkey-help { font-size:.68rem; }
 }
+
+/* Use the new 3D view as the course display. */
+#flight-canvas, #course-canvas, .course-visual, .course-map, .flight-visual {
+  display:none !important;
+}
+.wii-course-shell { display:block !important; }

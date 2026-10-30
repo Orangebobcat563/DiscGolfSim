@@ -493,15 +493,3 @@ body.sim-big-screen .stats-grid { font-size:1.05rem; }
 .sim-disc-type strong{font-size:.82rem}
 .sim-disc-type small{font-size:.58rem;opacity:.7;margin-top:2px}
 .sim-disc-type.selected{background:rgba(48,116,157,.16);box-shadow:inset 0 -4px 0 rgba(36,76,103,.6)}
-
-/* Simulator uses only the 3 quick disc classes now. Hide the old saved-disc UI. */
-#saved-discs,
-label[for="saved-discs"],
-.control-group:has(#saved-discs),
-.saved-disc-controls,
-.saved-discs-panel {
-  display:none !important;
-}
-/* Force the new 3-disc selector visible in the course HUD. */
-#wii-disc-corner{display:flex !important;visibility:visible !important;opacity:1 !important}
-#wii-disc-corner .sim-disc-type{display:block !important}

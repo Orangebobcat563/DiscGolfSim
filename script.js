@@ -2186,8 +2186,10 @@ if (cameraApiAvailable) {
   }
   function centerAt(z,total){
     const L=layoutSafe(), p=Math.max(0,Math.min(1,z/Math.max(1,total)));
-    // Terrain can bend, but the basket is always centered in the player's view.
-    return L.bend * Math.sin(Math.PI*p) * 0.72;
+    // View is re-oriented after every landing so the basket is straight ahead.
+    // The dogleg terrain still curves, but the target endpoint is centered.
+    const raw=L.bend*(p*p*(3-2*p));
+    return raw - L.bend*p;
   }
   function tree(x,z){
     const p=project(x,z),s=p.scale;
@@ -2276,7 +2278,7 @@ if (cameraApiAvailable) {
     if(layout.feature==="gap"){
       const z=total*.48,c=centerAt(z,total);tree(c-14,z);tree(c+14,z);
     }
-    basket(remaining,0);
+    basket(remaining, centerAt(remaining,total));
     const d=visualDisc || {lateral:0,forward:0,height:1.2};
     const dp=project(d.lateral,d.forward,d.height);
     ctx.save();ctx.translate(dp.x,dp.y);ctx.rotate(d.roll||0);
@@ -2285,64 +2287,45 @@ if (cameraApiAvailable) {
     const hi=document.querySelector("#wii-hole-label"),di=document.querySelector("#wii-distance-label");
     if(hi)hi.textContent=`HOLE ${(typeof currentHoleIndex==="number"?currentHoleIndex:0)+1} · ${hole.name||""}`;
     if(di)di.textContent=overthrown
-      ? `${Math.round(remaining)} FT PAST PIN · FACING BACK TO BASKET · PAR ${hole.par||3}`
+      ? `${Math.round(remaining)} FT PAST PIN · PAR ${hole.par||3}`
       : `${Math.round(remaining)} FT LEFT · PAR ${hole.par||3}`;
     drawMiniMap();
     updateDiscHud();
   }
   function fly(before,after){
     if(anim)cancelAnimationFrame(anim);
-
-    // Work out the actual throw distance from old lie to new lie.
-    const globalDX=(after.lateral||0)-(before.lateral||0);
-    const globalDZ=(after.downrange||0)-(before.downrange||0);
-    const throwLen=Math.max(1,Math.hypot(globalDX,globalDZ));
-
-    // The camera is always facing the basket, so screen-forward is toward the target.
-    // Use only the measured aim as a small left/right screen offset.
-    let aimDeg=0;
-    try{ aimDeg=Number(controls?.aim?.value||0); }catch(_){}
-    const aimRad=aimDeg*Math.PI/180;
-    const screenForward=Math.max(1,throwLen*Math.cos(aimRad));
-    const screenLateral=throwLen*Math.sin(aimRad);
-
+    const dx=(after.lateral||0)-(before.lateral||0);
+    const dz=(after.downrange||0)-(before.downrange||0);
     const start=performance.now();
-    const dur=Math.max(900,Math.min(2500,850+throwLen*5.2));
+    const throwLen=Math.max(1,Math.hypot(dx,dz));
+    const dur=Math.max(850,Math.min(2300,780+throwLen*5.5));
+    // Smooth flight: gentle early turn, late fade, and one continuous height arc.
     const type=window.simDiscType||"driver";
-    const curve=type==="driver"?2.2:type==="midrange"?1.25:.55;
-
+    const curveStrength=type==="putter"?0.8:type==="midrange"?1.5:2.5;
     function frame(now){
       const t=Math.min(1,(now-start)/dur);
-      const e=t*t*(3-2*t);
-
-      // One smooth disc-golf-like arc: slight turn early, gentle fade late.
-      const turnFade=Math.sin(Math.PI*t) * curve * (t-.42);
-      const peak=Math.min(18,3.5+throwLen*.045);
-      const height=.18 + Math.sin(Math.PI*t)*peak;
-
+      const smooth=t*t*(3-2*t);
+      const lateralCurve=Math.sin(Math.PI*t)*curveStrength*(t<.58?-0.45:0.75);
+      const heightPeak=Math.min(20,4+throwLen*.05);
+      const height=1.15+Math.sin(Math.PI*t)*heightPeak*(0.92+0.08*Math.cos(Math.PI*t));
       visualDisc={
-        lateral:screenLateral*e+turnFade,
-        forward:screenForward*e,
+        lateral:dx*smooth+lateralCurve,
+        forward:dz*smooth,
         height,
-        roll:.08*Math.sin(Math.PI*t)
+        roll:(type==="driver"?0.18:type==="midrange"?0.11:0.06)*Math.sin(Math.PI*t)
       };
       draw();
-
       if(t<1){
         anim=requestAnimationFrame(frame);
       }else{
-        // Show the disc at the exact visual landing point first.
-        visualDisc={lateral:screenLateral,forward:screenForward,height:.12,roll:0};
+        // Land exactly where physics says the disc landed, then move the viewpoint.
+        visualDisc={lateral:dx,forward:dz,height:0.18,roll:0};
         draw();
-
         setTimeout(()=>{
-          // Only now move the player/camera to the real physics landing position.
-          anim=null;
-          visualDisc=null;
-          displayLie={...after};
-          lastLie={...after};
+          anim=null; visualDisc=null;
+          displayLie={...after}; lastLie={...after};
           draw();
-        },220);
+        },180);
       }
     }
     anim=requestAnimationFrame(frame);
@@ -2392,7 +2375,7 @@ if (cameraApiAvailable) {
     miniCtx.strokeStyle="#4b6170";miniCtx.lineWidth=2;miniCtx.beginPath();miniCtx.moveTo(bx,by);miniCtx.lineTo(bx,by+10);miniCtx.stroke();
     // Player/current lie can pass beyond the basket; don't clamp overthrows to the pin.
     const progress=(lie.downrange||0)/hd;
-    const py=Math.max(8,Math.min(h-8,h*.92-progress*h*.82));
+    const py=h*.92-progress*h*.82;
     const px=mapX(Math.min(hd,Math.max(0,lie.downrange||0)))+Math.max(-w*.23,Math.min(w*.23,(lie.lateral||0)*1.2));
     miniCtx.fillStyle="#ffffff";miniCtx.strokeStyle="#244c67";miniCtx.lineWidth=2;
     miniCtx.beginPath();miniCtx.arc(px,py,6,0,Math.PI*2);miniCtx.fill();miniCtx.stroke();

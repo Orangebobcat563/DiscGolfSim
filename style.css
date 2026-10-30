@@ -508,3 +508,5 @@ label[for="saved-discs"],
 
 /* First-person course view */
 #course-3d-canvas{cursor:crosshair}
+
+#course-3d-canvas{display:block;width:100%;height:100%;}

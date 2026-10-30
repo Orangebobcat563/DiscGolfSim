@@ -2141,323 +2141,169 @@ if (cameraApiAvailable) {
 }
 
 
-/* ===== SELF-CONTAINED COURSE + MONITOR HOTKEYS ===== */
+/* ===== FIRST-PERSON COURSE RENDERER ===== */
 (() => {
-  const canvas=document.querySelector("#course-3d-canvas");
-  const bigScreenButton=document.querySelector("#big-screen-button");
-  if(!canvas) return;
-  const ctx=canvas.getContext("2d");
-  const miniCanvas=document.querySelector("#wii-mini-map-canvas");
-  const miniCtx=miniCanvas?.getContext("2d");
-  let dpr=1, anim=null, cameraMoveAnim=null, visualDisc=null, lastLie={lateral:0,downrange:0}, displayLie={lateral:0,downrange:0};
+  const canvas=document.querySelector("#course-3d-canvas"),ctx=canvas?.getContext("2d");
+  const mini=document.querySelector("#wii-mini-map-canvas"),mctx=mini?.getContext("2d");
+  const big=document.querySelector("#big-screen-button");
+  if(!canvas||!ctx)return;
 
-  function holeSafe(){ try{return typeof currentHole==="function"?currentHole():null}catch(_){return null} }
-  function lieSafe(){ try{return currentLie?{lateral:currentLie.lateral||0,downrange:currentLie.downrange||0}:{lateral:0,downrange:0}}catch(_){return {lateral:0,downrange:0}} }
-  function resize(){
-    const r=canvas.getBoundingClientRect(); dpr=Math.min(devicePixelRatio||1,2);
-    canvas.width=Math.max(1,Math.round(r.width*dpr)); canvas.height=Math.max(1,Math.round(r.height*dpr));
-    ctx.setTransform(dpr,0,0,dpr,0,0); draw();
+  let anim=null,moveAnim=null,disc=null;
+  let viewLie={lateral:0,downrange:0},seenLie={lateral:0,downrange:0};
+
+  const layouts=[
+    {bend:0,width:46,kind:"park"},{bend:-20,width:27,kind:"woods"},
+    {bend:8,width:62,kind:"meadow"},{bend:-42,width:34,kind:"left"},
+    {bend:18,width:34,kind:"creek"},{bend:0,width:68,kind:"open"},
+    {bend:42,width:31,kind:"right"},{bend:-12,width:39,kind:"hill"},
+    {bend:18,width:42,kind:"finish"}
+  ];
+  const hole=()=>{try{return currentHole()}catch(_){return{distance:300,par:3,name:"Hole"}}};
+  const lie=()=>{try{return currentLie?{lateral:+currentLie.lateral||0,downrange:+currentLie.downrange||0}:{lateral:0,downrange:0}}catch(_){return{lateral:0,downrange:0}}};
+  const hi=()=>typeof currentHoleIndex==="number"?currentHoleIndex:0;
+  const layout=()=>layouts[Math.max(0,Math.min(8,hi()))];
+
+  function size(){
+    const r=canvas.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2);
+    canvas.width=Math.max(1,Math.round(r.width*d));canvas.height=Math.max(1,Math.round(r.height*d));
+    ctx.setTransform(d,0,0,d,0,0);draw();
   }
-  function project(lateral, forward, height=0){
+
+  // This is a real player-relative projection. z=0 is at your feet and +z is
+  // straight toward the basket. After an overthrow the direction reverses.
+  function P(x,z,y=0){
     const w=canvas.clientWidth,h=canvas.clientHeight;
-    const depth=Math.max(0,forward),t=Math.min(1.35,depth/330);
-    const horizon=h*.40,bottom=h*.985;
-    const y=bottom-(bottom-horizon)*(1-Math.exp(-depth/100))-height*(1.62-t*.72);
-    const spread=w*.51*(1-t*.77);
-    return{x:w/2+(lateral/62)*spread,y,scale:Math.max(.17,1-t*.79)};
+    z=Math.max(1,z);
+    const focal=w*.92, horizon=h*.43;
+    return {x:w/2+x*focal/z,y:horizon+(5.2-y)*focal/z,s:Math.min(2.4,focal/z)};
   }
   function tree(x,z){
-    const p=project(x,z),s=p.scale;
-    ctx.fillStyle="#684629";ctx.fillRect(p.x-3*s,p.y-32*s,6*s,32*s);
-    ctx.fillStyle="#28623a";
-    ctx.beginPath();ctx.moveTo(p.x,p.y-70*s);ctx.lineTo(p.x-22*s,p.y-22*s);ctx.lineTo(p.x+22*s,p.y-22*s);ctx.closePath();ctx.fill();
+    if(z<3)return;const p=P(x,z,0),s=Math.max(.18,p.s);
+    ctx.fillStyle="#68472b";ctx.fillRect(p.x-2.4*s,p.y-35*s,4.8*s,35*s);
+    ctx.fillStyle="#28633b";ctx.beginPath();ctx.moveTo(p.x,p.y-78*s);ctx.lineTo(p.x-24*s,p.y-28*s);ctx.lineTo(p.x+24*s,p.y-28*s);ctx.closePath();ctx.fill();
   }
-  function basket(z,lateral=0){
-    const p=project(lateral,z),s=Math.max(.35,p.scale);
-    ctx.strokeStyle="#e5e7eb";ctx.lineWidth=Math.max(2,3*s);
-    ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(p.x,p.y-55*s);ctx.stroke();
+  function basket(z){
+    z=Math.max(5,z);const p=P(0,z,0),s=Math.max(.28,p.s);
+    ctx.strokeStyle="#e6e8e8";ctx.lineWidth=Math.max(1.5,2.5*s);ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(p.x,p.y-53*s);ctx.stroke();
     ctx.fillStyle="#ffd43b";ctx.fillRect(p.x-18*s,p.y-52*s,36*s,7*s);
-    ctx.strokeStyle="#d1d5db";ctx.lineWidth=Math.max(1,1.5*s);
-    for(let i=-12;i<=12;i+=6){ctx.beginPath();ctx.moveTo(p.x+i*s,p.y-45*s);ctx.lineTo(p.x+i*.55*s,p.y-20*s);ctx.stroke();}
-    ctx.beginPath();ctx.moveTo(p.x-21*s,p.y-18*s);ctx.lineTo(p.x+21*s,p.y-18*s);ctx.lineTo(p.x+14*s,p.y-10*s);ctx.lineTo(p.x-14*s,p.y-10*s);ctx.closePath();ctx.stroke();
-    ctx.strokeStyle="#f4c430";ctx.beginPath();ctx.moveTo(p.x,p.y-55*s);ctx.lineTo(p.x,p.y-88*s);ctx.stroke();
-    ctx.fillStyle="#ffd43b";ctx.beginPath();ctx.moveTo(p.x,p.y-87*s);ctx.lineTo(p.x+24*s,p.y-80*s);ctx.lineTo(p.x,p.y-73*s);ctx.closePath();ctx.fill();
+    ctx.strokeStyle="#d8dadd";ctx.lineWidth=Math.max(1,1.2*s);
+    for(let i=-12;i<=12;i+=6){ctx.beginPath();ctx.moveTo(p.x+i*s,p.y-44*s);ctx.lineTo(p.x+i*.5*s,p.y-20*s);ctx.stroke()}
+    ctx.beginPath();ctx.moveTo(p.x-20*s,p.y-18*s);ctx.lineTo(p.x+20*s,p.y-18*s);ctx.lineTo(p.x+13*s,p.y-10*s);ctx.lineTo(p.x-13*s,p.y-10*s);ctx.closePath();ctx.stroke();
+    ctx.strokeStyle="#f2c52e";ctx.beginPath();ctx.moveTo(p.x,p.y-53*s);ctx.lineTo(p.x,p.y-88*s);ctx.stroke();
+    ctx.fillStyle="#ffd43b";ctx.beginPath();ctx.moveTo(p.x,p.y-87*s);ctx.lineTo(p.x+24*s,p.y-80*s);ctx.lineTo(p.x,p.y-73*s);ctx.fill();
   }
+
+  function fairwayPoint(z,total){
+    const L=layout(),p=Math.max(0,Math.min(1,z/Math.max(1,total)));
+    // Basket endpoint is zero: fairway bends around you but returns to target.
+    return L.bend*Math.sin(Math.PI*p);
+  }
+
+  function drawMap(){
+    if(!mini||!mctx)return;const r=mini.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2);
+    if(mini.width!==Math.round(r.width*d)||mini.height!==Math.round(r.height*d)){mini.width=Math.round(r.width*d);mini.height=Math.round(r.height*d)}
+    mctx.setTransform(d,0,0,d,0,0);const w=r.width,h=r.height,H=hole(),L=layout();
+    mctx.fillStyle="#dfead5";mctx.fillRect(0,0,w,h);
+    mctx.strokeStyle="#76ad59";mctx.lineWidth=Math.max(18,L.width*.48);mctx.lineCap="round";mctx.beginPath();
+    for(let z=0;z<=H.distance;z+=8){const p=z/H.distance,x=w/2+(L.bend*Math.sin(Math.PI*p)/80)*w*.65,y=h*.92-p*h*.82;if(z===0)mctx.moveTo(x,y);else mctx.lineTo(x,y)}mctx.stroke();
+    mctx.fillStyle="#ffd43b";mctx.beginPath();mctx.arc(w/2,h*.10,6,0,Math.PI*2);mctx.fill();
+    mctx.fillStyle="#fff";mctx.strokeStyle="#244c67";mctx.lineWidth=2;mctx.beginPath();mctx.arc(w/2,h*.92,6,0,Math.PI*2);mctx.fill();mctx.stroke();
+  }
+
   function draw(){
     const w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h)return;
-    const hole=holeSafe()||{distance:300,par:3,name:"Hole"};
-    const lie=displayLie, rawRemaining=(hole.distance||300)-lie.downrange;
-    const overthrown=rawRemaining<0, remaining=Math.max(1,Math.abs(rawRemaining));
-    const sky=ctx.createLinearGradient(0,0,0,h*.55);sky.addColorStop(0,"#79bde8");sky.addColorStop(1,"#d9effb");ctx.fillStyle=sky;ctx.fillRect(0,0,w,h);
-    // Soft clouds and rolling hills for a Wii Sports Golf-like bright course feel.
-    ctx.fillStyle="rgba(255,255,255,.78)";
-    for(const c of [[.18,.14,34],[.25,.12,25],[.72,.17,30],[.79,.15,22]]){ctx.beginPath();ctx.arc(w*c[0],h*c[1],c[2],0,Math.PI*2);ctx.fill()}
-    ctx.fillStyle="#5f9253";ctx.beginPath();ctx.moveTo(0,h*.34);ctx.quadraticCurveTo(w*.18,h*.22,w*.36,h*.34);ctx.quadraticCurveTo(w*.56,h*.20,w*.72,h*.34);ctx.quadraticCurveTo(w*.88,h*.25,w,h*.34);ctx.lineTo(w,h*.48);ctx.lineTo(0,h*.48);ctx.closePath();ctx.fill();
-    ctx.fillStyle="#467b42";ctx.fillRect(0,h*.30,w,h*.70);
-    
-    // Hole-specific terrain/background. These intentionally look different hole-to-hole.
-    const terrain=layoutSafe().feature;
-    if(terrain==="gap"){
-      ctx.fillStyle="#315f36";
-      ctx.fillRect(0,h*.30,w*.17,h*.70); ctx.fillRect(w*.83,h*.30,w*.17,h*.70);
-    }else if(terrain==="meadow"){
-      ctx.fillStyle="rgba(245,214,83,.42)";
-      for(let x=18;x<w;x+=38){ctx.beginPath();ctx.arc(x,h*.72+(x%4)*18,4,0,Math.PI*2);ctx.fill()}
-    }else if(terrain==="dogleg-left"){
-      ctx.fillStyle="#355f32";ctx.beginPath();ctx.ellipse(w*.78,h*.58,w*.22,h*.22,0,0,Math.PI*2);ctx.fill();
-    }else if(terrain==="creek"){
-      ctx.fillStyle="rgba(66,151,205,.65)";ctx.fillRect(0,h*.59,w,h*.055);
-    }else if(terrain==="long"){
-      ctx.fillStyle="rgba(224,196,113,.28)";ctx.fillRect(0,h*.70,w,h*.30);
-    }else if(terrain==="dogleg-right"){
-      ctx.fillStyle="#355f32";ctx.beginPath();ctx.ellipse(w*.22,h*.58,w*.22,h*.22,0,0,Math.PI*2);ctx.fill();
-    }else if(terrain==="uphill"){
-      ctx.fillStyle="#568a48";ctx.beginPath();ctx.moveTo(0,h*.70);ctx.quadraticCurveTo(w*.5,h*.43,w,h*.70);ctx.lineTo(w,h);ctx.lineTo(0,h);ctx.closePath();ctx.fill();
-    }else if(terrain==="finish"){
-      ctx.fillStyle="rgba(45,104,57,.5)";
-      ctx.beginPath();ctx.ellipse(w*.12,h*.52,w*.16,h*.22,0,0,Math.PI*2);ctx.fill();
-      ctx.beginPath();ctx.ellipse(w*.88,h*.55,w*.14,h*.20,0,0,Math.PI*2);ctx.fill();
+    const H=hole(),L=layout();
+    const signed=H.distance-viewLie.downrange, past=signed<0, targetDist=Math.max(5,Math.abs(signed));
+
+    // Sky + horizon.
+    const sky=ctx.createLinearGradient(0,0,0,h*.55);sky.addColorStop(0,"#72b9e8");sky.addColorStop(1,"#dff2fb");ctx.fillStyle=sky;ctx.fillRect(0,0,w,h);
+    ctx.fillStyle="#5c8f50";ctx.beginPath();ctx.moveTo(0,h*.46);ctx.quadraticCurveTo(w*.2,h*.34,w*.38,h*.45);ctx.quadraticCurveTo(w*.62,h*.31,w*.78,h*.45);ctx.quadraticCurveTo(w*.9,h*.37,w,h*.45);ctx.lineTo(w,h*.55);ctx.lineTo(0,h*.55);ctx.fill();
+    ctx.fillStyle="#477c43";ctx.fillRect(0,h*.43,w,h*.57);
+
+    // First-person fairway polygon from your feet to the target.
+    const maxZ=Math.min(420,targetDist+40),left=[],right=[];
+    for(let z=4;z<=maxZ;z+=5){const c=fairwayPoint(z,targetDist),half=L.width/2;left.push(P(c-half,z));right.push(P(c+half,z))}
+    ctx.fillStyle="#75ae59";ctx.beginPath();
+    right.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
+    left.reverse().forEach(p=>ctx.lineTo(p.x,p.y));ctx.closePath();ctx.fill();
+
+    // Strongly different hole terrain.
+    if(L.kind==="creek"){const z=Math.min(targetDist*.55,120),a=P(-50,z),b=P(50,z);ctx.strokeStyle="#4ca7d8";ctx.lineWidth=Math.max(5,P(0,z).s*12);ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke()}
+    if(L.kind==="hill"){ctx.fillStyle="rgba(62,117,56,.45)";ctx.beginPath();ctx.ellipse(w/2,h*.58,w*.35,h*.11,0,0,Math.PI*2);ctx.fill()}
+    if(L.kind==="meadow"){ctx.fillStyle="rgba(245,215,92,.55)";for(let x=20;x<w;x+=35){ctx.beginPath();ctx.arc(x,h*.82+(x%55),3,0,Math.PI*2);ctx.fill()}}
+
+    // Trees get genuinely larger near the player.
+    for(let z=18;z<Math.min(maxZ,300);z+=22){
+      const c=fairwayPoint(z,targetDist),half=L.width/2;
+      if(L.kind!=="right" && (L.kind!=="open"||z%44<24))tree(c-half-12,z);
+      if(L.kind!=="left" && (L.kind!=="open"||z%44<24))tree(c+half+12,z);
+    }
+    basket(targetDist);
+
+    // Player lie/feet marker.
+    ctx.strokeStyle="rgba(255,255,255,.72)";ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(w/2,h*.965,30,6,0,0,Math.PI*2);ctx.stroke();
+
+    if(disc){
+      const p=P(disc.x,Math.max(2,disc.z),disc.y);ctx.save();ctx.translate(p.x,p.y);ctx.rotate(disc.roll||0);
+      ctx.fillStyle="#ff5a2f";ctx.beginPath();ctx.ellipse(0,0,Math.max(5,11*p.s),Math.max(2,4*p.s),0,0,Math.PI*2);ctx.fill();ctx.strokeStyle="#fff";ctx.stroke();ctx.restore();
     }
 
-// Curved fairway: each of the 9 holes has its own width/bend/layout.
-    // First-person foreground around the exact current lie.
-    const fpSeed=Math.round(displayLie.downrange*5)+Math.round(displayLie.lateral*11)+(typeof currentHoleIndex==="number"?currentHoleIndex:0)*31;
-    ctx.fillStyle="rgba(30,72,38,.34)";
-    for(let i=0;i<32;i++){
-      const gx=((i*97+fpSeed*13)%Math.max(1,w));
-      const gy=h*.76+(((i*53+fpSeed*7)%100)/100)*h*.22;
-      ctx.beginPath();ctx.arc(gx,gy,1.5+Math.abs((i+fpSeed)%4),0,Math.PI*2);ctx.fill();
-    }
-    ctx.strokeStyle="rgba(255,255,255,.68)";ctx.lineWidth=2;
-    ctx.beginPath();ctx.ellipse(w*.5,h*.965,28,6,0,0,Math.PI*2);ctx.stroke();
-
-    const layout=layoutSafe(), total=Math.max(remaining,40);
-    ctx.fillStyle="#73ad58";
-    const leftPts=[],rightPts=[];
-    for(let z=0;z<=Math.min(total,420);z+=10){
-      const c=centerAt(z,total), half=layout.width/2;
-      leftPts.push(project(c-half,z)); rightPts.push(project(c+half,z));
-    }
-    ctx.beginPath();
-    rightPts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
-    leftPts.reverse().forEach(p=>ctx.lineTo(p.x,p.y));ctx.closePath();ctx.fill();
-
-    // Unique hole feature accents.
-    if(layout.feature==="creek"){
-      const z=total*.58,c=centerAt(z,total),p=project(c,z);
-      ctx.strokeStyle="#4fa9d8";ctx.lineWidth=Math.max(5,18*p.scale);
-      ctx.beginPath();ctx.moveTo(p.x-80*p.scale,p.y);ctx.quadraticCurveTo(p.x,p.y+10*p.scale,p.x+80*p.scale,p.y-3*p.scale);ctx.stroke();
-    }
-    if(layout.feature==="uphill"){
-      const p=project(centerAt(total*.72,total),total*.72);
-      ctx.fillStyle="rgba(80,120,64,.42)";ctx.beginPath();ctx.ellipse(p.x,p.y+12,90*p.scale,28*p.scale,0,0,Math.PI*2);ctx.fill();
-    }
-
-    ctx.strokeStyle="rgba(255,255,255,.55)";ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(w*.38,h*.91);ctx.lineTo(w*.62,h*.91);ctx.stroke();
-
-    for(let z=18;z<Math.min(Math.max(total,40),420);z+=20){
-      const c=centerAt(z,total), half=layout.width/2;
-      if(layout.trees!=="right" && (layout.trees!=="sparse" || z%40===18)) tree(c-half-10-(z%9),z);
-      if(layout.trees!=="left" && (layout.trees!=="sparse" || z%40===18)) tree(c+half+10+(z%7),z);
-    }
-    // Pine Gap gets a tighter visual window near the middle.
-    if(layout.feature==="gap"){
-      const z=total*.48,c=centerAt(z,total);tree(c-14,z);tree(c+14,z);
-    }
-    const nearLayout=layoutSafe();
-    if(nearLayout.trees!=="right") tree(-52,18);
-    if(nearLayout.trees!=="left") tree(52,21);
-    basket(remaining,0);
-    const d=visualDisc || {lateral:0,forward:0,height:1.2};
-    const dp=project(d.lateral,d.forward,d.height);
-    ctx.save();ctx.translate(dp.x,dp.y);ctx.rotate(d.roll||0);
-    ctx.fillStyle="#ff5a2f";ctx.beginPath();ctx.ellipse(0,0,Math.max(7,13*dp.scale),Math.max(3,5*dp.scale),0,0,Math.PI*2);ctx.fill();
-    ctx.strokeStyle="#fff";ctx.lineWidth=1.5;ctx.stroke();ctx.restore();
-    const hi=document.querySelector("#wii-hole-label"),di=document.querySelector("#wii-distance-label");
-    if(hi)hi.textContent=`HOLE ${(typeof currentHoleIndex==="number"?currentHoleIndex:0)+1} · ${hole.name||""}`;
-    if(di)di.textContent=overthrown
-      ? `${Math.round(remaining)} FT PAST PIN · FACING BACK TO BASKET · PAR ${hole.par||3}`
-      : `${Math.round(remaining)} FT LEFT · PAR ${hole.par||3}`;
-    drawMiniMap();
-    updateDiscHud();
+    const hl=document.querySelector("#wii-hole-label"),dl=document.querySelector("#wii-distance-label");
+    if(hl)hl.textContent=`HOLE ${hi()+1} · ${H.name||""}`;
+    if(dl)dl.textContent=past?`${Math.round(targetDist)} FT PAST PIN · FACING BASKET · PAR ${H.par||3}`:`${Math.round(targetDist)} FT LEFT · PAR ${H.par||3}`;
+    drawMap();
   }
+
   function fly(before,after){
     if(anim)cancelAnimationFrame(anim);
-
-    // Work out the actual throw distance from old lie to new lie.
-    const globalDX=(after.lateral||0)-(before.lateral||0);
-    const globalDZ=(after.downrange||0)-(before.downrange||0);
-    const throwLen=Math.max(1,Math.hypot(globalDX,globalDZ));
-
-    // The camera is always facing the basket, so screen-forward is toward the target.
-    // Use only the measured aim as a small left/right screen offset.
-    let aimDeg=0;
-    try{ aimDeg=Number(controls?.aim?.value||0); }catch(_){}
-    const aimRad=aimDeg*Math.PI/180;
-    const screenForward=Math.max(1,throwLen*Math.cos(aimRad));
-    const screenLateral=throwLen*Math.sin(aimRad);
-
-    const start=performance.now();
-    const dur=Math.max(900,Math.min(2500,850+throwLen*5.2));
-    const type=window.simDiscType||"driver";
-    const curve=type==="driver"?2.2:type==="midrange"?1.25:.55;
-
-    function frame(now){
-      const t=Math.min(1,(now-start)/dur);
-      const e=t*t*(3-2*t);
-
-      // One smooth disc-golf-like arc: slight turn early, gentle fade late.
-      const turnFade=Math.sin(Math.PI*t) * curve * (t-.42);
-      const peak=Math.min(18,3.5+throwLen*.045);
-      const height=.18 + Math.sin(Math.PI*t)*peak;
-
-      visualDisc={
-        lateral:screenLateral*e+turnFade,
-        forward:screenForward*e,
-        height,
-        roll:.08*Math.sin(Math.PI*t)
-      };
+    const dx=(after.lateral||0)-(before.lateral||0),dz=(after.downrange||0)-(before.downrange||0),len=Math.max(1,Math.hypot(dx,dz));
+    let aim=0;try{aim=Number(controls?.aim?.value||0)}catch(_){}
+    const ar=aim*Math.PI/180,endX=len*Math.sin(ar),endZ=Math.max(2,len*Math.cos(ar));
+    const started=performance.now(),duration=Math.max(900,Math.min(2400,800+len*5.4));
+    function f(now){
+      const t=Math.min(1,(now-started)/duration),e=t*t*(3-2*t);
+      disc={x:endX*e+Math.sin(Math.PI*t)*(t-.45)*2,z:endZ*e,y:.15+Math.sin(Math.PI*t)*Math.min(18,3.5+len*.045),roll:.08*Math.sin(Math.PI*t)};
       draw();
-
-      if(t<1){
-        anim=requestAnimationFrame(frame);
-      }else{
-        // Show the disc at the exact visual landing point first.
-        visualDisc={lateral:screenLateral,forward:screenForward,height:.12,roll:0};
-        draw();
-
-        setTimeout(()=>{
-          anim=null;
-          const from={...displayLie},to={...after},started=performance.now(),duration=760;
-          function goToLie(now2){
-            const q=Math.min(1,(now2-started)/duration),e=q*q*(3-2*q);
-            displayLie={
-              lateral:from.lateral+(to.lateral-from.lateral)*e,
-              downrange:from.downrange+(to.downrange-from.downrange)*e
-            };
-            visualDisc={lateral:0,forward:Math.max(0,10*(1-e)),height:.08,roll:0};
-            draw();
-            if(q<1)cameraMoveAnim=requestAnimationFrame(goToLie);
-            else{
-              cameraMoveAnim=null;displayLie={...to};lastLie={...to};visualDisc=null;draw();
-            }
-          }
-          cameraMoveAnim=requestAnimationFrame(goToLie);
-        },300);
+      if(t<1)anim=requestAnimationFrame(f);else{
+        disc={x:endX,z:endZ,y:.08,roll:0};draw();
+        setTimeout(()=>moveTo(after),280);
       }
-    }
-    anim=requestAnimationFrame(frame);
+    }anim=requestAnimationFrame(f);
   }
 
-  function visibleDiscOptions(){
-    return [...document.querySelectorAll(".disc-option,.disc-card,[data-disc]")].filter(e=>e.offsetParent!==null);
+  function moveTo(to){
+    anim=null;const from={...viewLie},st=performance.now(),dur=850;
+    function f(now){
+      const t=Math.min(1,(now-st)/dur),e=t*t*(3-2*t);
+      viewLie={lateral:from.lateral+(to.lateral-from.lateral)*e,downrange:from.downrange+(to.downrange-from.downrange)*e};
+      disc=null;draw();
+      if(t<1)moveAnim=requestAnimationFrame(f);else{moveAnim=null;viewLie={...to};seenLie={...to};draw()}
+    }moveAnim=requestAnimationFrame(f);
   }
-  function selectedDiscElement(){
-    const opts=visibleDiscOptions();
-    return opts.find(e=>e.classList.contains("selected")||e.getAttribute("aria-pressed")==="true"||e.checked) || opts[0] || null;
-  }
-  function readDiscNumbers(el){
-    if(!el)return {name:"NO DISC",speed:"—",glide:"—",turn:"—",fade:"—"};
-    const text=(el.innerText||el.textContent||"").replace(/\s+/g," ").trim();
-    const ds=el.dataset||{};
-    const pick=(key)=>{
-      if(ds[key]!==undefined)return ds[key];
-      const m=text.match(new RegExp(key+"\\\\s*[:\\\\-]?\\\\s*(-?\\\\d+(?:\\\\.\\\\d+)?)","i"));
-      return m?m[1]:"—";
-    };
-    let name=ds.name||ds.discName||el.querySelector(".disc-name,.name,h3,h4,strong")?.textContent?.trim()||text.split(/Speed|Glide|Turn|Fade/i)[0].trim();
-    if(!name)name="SAVED DISC";
-    return {name,speed:pick("speed"),glide:pick("glide"),turn:pick("turn"),fade:pick("fade")};
-  }
-  function updateDiscHud(){}
 
-  function drawMiniMap(){
-    if(!miniCanvas||!miniCtx)return;
-    const r=miniCanvas.getBoundingClientRect(),ratio=Math.min(devicePixelRatio||1,2);
-    const W=Math.max(1,Math.round(r.width*ratio)),H=Math.max(1,Math.round(r.height*ratio));
-    if(miniCanvas.width!==W||miniCanvas.height!==H){miniCanvas.width=W;miniCanvas.height=H}
-    miniCtx.setTransform(ratio,0,0,ratio,0,0);
-    const w=r.width,h=r.height,hole=holeSafe()||{distance:300},lie=displayLie;
-    miniCtx.clearRect(0,0,w,h);miniCtx.fillStyle="#dfead5";miniCtx.fillRect(0,0,w,h);
-    // Top-down map uses the same unique bend as the main course.
-    const L=layoutSafe(), hd=hole.distance||300;
-    const mapX=(z)=>w*.50+(centerAt(z,hd)/70)*w*.62;
-    const mapY=(z)=>h*.92-(z/hd)*h*.82;
-    miniCtx.fillStyle="#77ad59";miniCtx.strokeStyle="#77ad59";miniCtx.lineWidth=Math.max(18,L.width*.55);miniCtx.lineCap="round";
-    miniCtx.beginPath();
-    for(let z=0;z<=hd;z+=10){const x=mapX(z),y=mapY(z);if(z===0)miniCtx.moveTo(x,y);else miniCtx.lineTo(x,y)}
-    miniCtx.stroke();
-    // Basket follows the dogleg endpoint.
-    const bx=mapX(hd),by=mapY(hd);
-    miniCtx.fillStyle="#ffd43b";miniCtx.beginPath();miniCtx.arc(bx,by,6,0,Math.PI*2);miniCtx.fill();
-    miniCtx.strokeStyle="#4b6170";miniCtx.lineWidth=2;miniCtx.beginPath();miniCtx.moveTo(bx,by);miniCtx.lineTo(bx,by+10);miniCtx.stroke();
-    // Player/current lie can pass beyond the basket; don't clamp overthrows to the pin.
-    const progress=(lie.downrange||0)/hd;
-    const py=Math.max(8,Math.min(h-8,h*.92-progress*h*.82));
-    const px=mapX(Math.min(hd,Math.max(0,lie.downrange||0)))+Math.max(-w*.23,Math.min(w*.23,(lie.lateral||0)*1.2));
-    miniCtx.fillStyle="#ffffff";miniCtx.strokeStyle="#244c67";miniCtx.lineWidth=2;
-    miniCtx.beginPath();miniCtx.arc(px,py,6,0,Math.PI*2);miniCtx.fill();miniCtx.stroke();
-    miniCtx.strokeStyle="rgba(36,76,103,.55)";miniCtx.setLineDash([4,4]);miniCtx.beginPath();miniCtx.moveTo(px,py);miniCtx.lineTo(bx,by);miniCtx.stroke();miniCtx.setLineDash([]);
-  }
-  const SIM_TYPES=["driver","midrange","putter"];
-  window.simDiscType=window.simDiscType||"driver";
-  function setSimDisc(type){
-    if(!SIM_TYPES.includes(type))return;
-    window.simDiscType=type;
-    document.querySelectorAll(".sim-disc-type").forEach(b=>b.classList.toggle("selected",b.dataset.simDisc===type));
-  }
-  function clickDisc(delta){
-    let i=SIM_TYPES.indexOf(window.simDiscType||"driver");
-    setSimDisc(SIM_TYPES[(i+delta+SIM_TYPES.length)%SIM_TYPES.length]);
-  }
-  function nextHoleKey(){const b=[...document.querySelectorAll("button")].find(x=>/next hole/i.test(x.textContent));if(b&&!b.disabled)b.click();}
-  async function big(){
-    document.body.classList.toggle("sim-big-screen");const on=document.body.classList.contains("sim-big-screen");
-    if(bigScreenButton)bigScreenButton.textContent=on?"✕ EXIT BIG SCREEN":"⛶ BIG SCREEN";
-    try{if(on&&document.documentElement.requestFullscreen)await document.documentElement.requestFullscreen();else if(!on&&document.fullscreenElement)await document.exitFullscreen()}catch(_){}
-    setTimeout(resize,80);
-  }
-  document.querySelectorAll(".sim-disc-type").forEach(b=>b.addEventListener("click",()=>setSimDisc(b.dataset.simDisc)));
-  setSimDisc(window.simDiscType);
-  bigScreenButton?.addEventListener("click",big);
+  const types=["driver","midrange","putter"];window.simDiscType=window.simDiscType||"driver";
+  function setType(t){if(!types.includes(t))return;window.simDiscType=t;document.querySelectorAll(".sim-disc-type").forEach(b=>b.classList.toggle("selected",b.dataset.simDisc===t))}
+  function cycle(d){let i=types.indexOf(window.simDiscType);setType(types[(i+d+types.length)%types.length])}
+  document.querySelectorAll(".sim-disc-type").forEach(b=>b.addEventListener("click",()=>setType(b.dataset.simDisc)));
+  setType(window.simDiscType);
+
+  seenLie=lie();viewLie={...seenLie};
+  setInterval(()=>{
+    const n=lie();
+    if(!anim&&!moveAnim&&(Math.abs(n.lateral-seenLie.lateral)>.01||Math.abs(n.downrange-seenLie.downrange)>.01)){
+      const before={...viewLie};seenLie={...n};
+      const lm=document.querySelector("#last-throw-main"),ld=document.querySelector("#last-throw-detail");
+      if(lm)lm.textContent=`${Math.round(Math.hypot(n.lateral-before.lateral,n.downrange-before.downrange))} ft`;
+      if(ld){let mph="—",aim="0.0°",ang="Flat";try{mph=controls.speed.value;aim=Number(controls.aim.value||0).toFixed(1)+"°";const a=Number(controls.hyzer.value||0);ang=a===0?"Flat":`${Math.abs(a).toFixed(1)}° ${a<0?"Hyzer":"Anhyzer"}`}catch(_){}ld.textContent=`${mph} mph · Aim ${aim} · ${ang}`}
+      fly(before,n);
+    }else if(!anim&&!moveAnim)draw();
+  },100);
+
   document.addEventListener("keydown",e=>{
     const tag=e.target?.tagName?.toLowerCase();if(["input","textarea","select"].includes(tag))return;
-    if(e.code==="Digit1"){e.preventDefault();setSimDisc("driver")}
-    if(e.code==="Digit2"){e.preventDefault();setSimDisc("midrange")}
-    if(e.code==="Digit3"){e.preventDefault();setSimDisc("putter")}
-    if(e.code==="ArrowRight"){e.preventDefault();clickDisc(1)}
-    if(e.code==="ArrowLeft"){e.preventDefault();clickDisc(-1)}
-    if(e.code==="KeyN"){e.preventDefault();nextHoleKey()}
-    if(e.code==="KeyF"){e.preventDefault();big()}
+    if(e.code==="Digit1")setType("driver");if(e.code==="Digit2")setType("midrange");if(e.code==="Digit3")setType("putter");
+    if(e.code==="ArrowLeft"){e.preventDefault();cycle(-1)}if(e.code==="ArrowRight"){e.preventDefault();cycle(1)}
   });
-  lastLie=lieSafe(); displayLie={...lastLie};
-  setInterval(()=>{
-    const l=lieSafe();
-    if(!anim&&!cameraMoveAnim&&(Math.abs(l.lateral-lastLie.lateral)>.01||Math.abs(l.downrange-lastLie.downrange)>.01)){
-      const b={...displayLie};
-      lastLie={...l};
-
-      // Update monitor HUD with the throw that just produced this landing position.
-      const lastMain=document.querySelector("#last-throw-main");
-      const lastDetail=document.querySelector("#last-throw-detail");
-      const throwFeet=Math.round(Math.hypot(
-        (l.downrange||0)-(b.downrange||0),
-        (l.lateral||0)-(b.lateral||0)
-      ));
-      if(lastMain) lastMain.textContent=`${throwFeet} ft`;
-      if(lastDetail){
-        let mph="—", aim="—", angle="—";
-        try{
-          mph=controls?.speed?.value ?? "—";
-          aim=Number(controls?.aim?.value ?? 0).toFixed(1)+"°";
-          const a=Number(controls?.hyzer?.value ?? 0);
-          angle=a===0?"Flat":`${Math.abs(a).toFixed(1)}° ${a<0?"Hyzer":"Anhyzer"}`;
-        }catch(_){}
-        lastDetail.textContent=`${mph} mph · Aim ${aim} · ${angle}`;
-      }
-      fly(b,l);
-    } else if(!anim&&!cameraMoveAnim) draw();
-  },100);
-  window.addEventListener("resize",resize);
-  resize();
+  big?.addEventListener("click",async()=>{document.body.classList.toggle("sim-big-screen");try{if(document.body.classList.contains("sim-big-screen"))await document.documentElement.requestFullscreen?.();else if(document.fullscreenElement)await document.exitFullscreen?.()}catch(_){}setTimeout(size,80)});
+  window.addEventListener("resize",size);size();
 })();

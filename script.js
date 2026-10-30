@@ -259,10 +259,18 @@ function getShot() {
   // to the existing tuning. This makes touch shots actually feel like touch shots.
   const slowThrowFactor = Math.max(0.24, Math.min(0.94, 0.24 + speed * 0.0115));
   const baseDistance = (4.05 * speed + 0.0095 * speed * speed) * slowThrowFactor;
-  const distance = Math.round(Math.max(20,
+  // Simulator quick-disc class. Driver keeps full distance; mids/putters trade
+  // distance for control, approximating normal real-world relative ranges.
+  const simDiscType = window.simDiscType || "driver";
+  const simClass = simDiscType === "putter"
+    ? { distance: 0.62, turn: 0.55, fade: 0.62 }
+    : simDiscType === "midrange"
+      ? { distance: 0.79, turn: 0.72, fade: 0.78 }
+      : { distance: 1.00, turn: 1.00, fade: 1.00 };
+  const distance = (Math.round(Math.max(20,
     baseDistance * launchEfficiency * releaseAngleEfficiency *
     discSpeedPotential * underSpeedPenalty * glideCarry * turnCarry * fadeCost
-  ));
+  ))) * simClass.distance;
 
   const targetForward = currentHole().distance - currentLie.downrange;
   const targetLateral = -currentLie.lateral;
@@ -2141,8 +2149,6 @@ if (cameraApiAvailable) {
   const ctx=canvas.getContext("2d");
   const miniCanvas=document.querySelector("#wii-mini-map-canvas");
   const miniCtx=miniCanvas?.getContext("2d");
-  const hudName=document.querySelector("#hud-disc-name");
-  const hudNums=["speed","glide","turn","fade"].map(k=>document.querySelector("#hud-"+k));
   let dpr=1, anim=null, visualDisc=null, lastLie={lateral:0,downrange:0}, displayLie={lateral:0,downrange:0};
 
   function holeSafe(){ try{return typeof currentHole==="function"?currentHole():null}catch(_){return null} }
@@ -2180,8 +2186,8 @@ if (cameraApiAvailable) {
   }
   function centerAt(z,total){
     const L=layoutSafe(), p=Math.max(0,Math.min(1,z/Math.max(1,total)));
-    // Smooth dogleg: little movement early, strongest bend in middle/late fairway.
-    return L.bend*(p*p*(3-2*p));
+    // Terrain can bend, but the basket is always centered in the player's view.
+    return L.bend * Math.sin(Math.PI*p) * 0.72;
   }
   function tree(x,z){
     const p=project(x,z),s=p.scale;
@@ -2270,7 +2276,7 @@ if (cameraApiAvailable) {
     if(layout.feature==="gap"){
       const z=total*.48,c=centerAt(z,total);tree(c-14,z);tree(c+14,z);
     }
-    basket(remaining, centerAt(remaining,total));
+    basket(remaining,0);
     const d=visualDisc || {lateral:0,forward:0,height:1.2};
     const dp=project(d.lateral,d.forward,d.height);
     ctx.save();ctx.translate(dp.x,dp.y);ctx.rotate(d.roll||0);
@@ -2279,30 +2285,67 @@ if (cameraApiAvailable) {
     const hi=document.querySelector("#wii-hole-label"),di=document.querySelector("#wii-distance-label");
     if(hi)hi.textContent=`HOLE ${(typeof currentHoleIndex==="number"?currentHoleIndex:0)+1} · ${hole.name||""}`;
     if(di)di.textContent=overthrown
-      ? `${Math.round(remaining)} FT PAST PIN · PAR ${hole.par||3}`
+      ? `${Math.round(remaining)} FT PAST PIN · FACING BACK TO BASKET · PAR ${hole.par||3}`
       : `${Math.round(remaining)} FT LEFT · PAR ${hole.par||3}`;
     drawMiniMap();
     updateDiscHud();
   }
   function fly(before,after){
     if(anim)cancelAnimationFrame(anim);
-    const hole=holeSafe()||{distance:300};
-    const dx=(after.lateral||0)-(before.lateral||0), dz=(after.downrange||0)-(before.downrange||0);
-    const start=performance.now(),dur=Math.max(700,Math.min(1900,700+Math.abs(dz)*5));
+
+    // Work out the actual throw distance from old lie to new lie.
+    const globalDX=(after.lateral||0)-(before.lateral||0);
+    const globalDZ=(after.downrange||0)-(before.downrange||0);
+    const throwLen=Math.max(1,Math.hypot(globalDX,globalDZ));
+
+    // The camera is always facing the basket, so screen-forward is toward the target.
+    // Use only the measured aim as a small left/right screen offset.
+    let aimDeg=0;
+    try{ aimDeg=Number(controls?.aim?.value||0); }catch(_){}
+    const aimRad=aimDeg*Math.PI/180;
+    const screenForward=Math.max(1,throwLen*Math.cos(aimRad));
+    const screenLateral=throwLen*Math.sin(aimRad);
+
+    const start=performance.now();
+    const dur=Math.max(900,Math.min(2500,850+throwLen*5.2));
+    const type=window.simDiscType||"driver";
+    const curve=type==="driver"?2.2:type==="midrange"?1.25:.55;
+
     function frame(now){
-      const t=Math.min(1,(now-start)/dur),e=t*t*(3-2*t);
-      visualDisc={lateral:dx*e,forward:Math.max(0,dz*e),height:1.2+Math.sin(Math.PI*t)*Math.min(18,4+Math.abs(dz)*.045),roll:t*12};
+      const t=Math.min(1,(now-start)/dur);
+      const e=t*t*(3-2*t);
+
+      // One smooth disc-golf-like arc: slight turn early, gentle fade late.
+      const turnFade=Math.sin(Math.PI*t) * curve * (t-.42);
+      const peak=Math.min(18,3.5+throwLen*.045);
+      const height=.18 + Math.sin(Math.PI*t)*peak;
+
+      visualDisc={
+        lateral:screenLateral*e+turnFade,
+        forward:screenForward*e,
+        height,
+        roll:.08*Math.sin(Math.PI*t)
+      };
       draw();
+
       if(t<1){
         anim=requestAnimationFrame(frame);
       }else{
-        anim=null;
-        visualDisc=null;
-        displayLie={...after};
-        lastLie={...after};
+        // Show the disc at the exact visual landing point first.
+        visualDisc={lateral:screenLateral,forward:screenForward,height:.12,roll:0};
         draw();
+
+        setTimeout(()=>{
+          // Only now move the player/camera to the real physics landing position.
+          anim=null;
+          visualDisc=null;
+          displayLie={...after};
+          lastLie={...after};
+          draw();
+        },220);
       }
-    } anim=requestAnimationFrame(frame);
+    }
+    anim=requestAnimationFrame(frame);
   }
 
   function visibleDiscOptions(){
@@ -2325,11 +2368,8 @@ if (cameraApiAvailable) {
     if(!name)name="SAVED DISC";
     return {name,speed:pick("speed"),glide:pick("glide"),turn:pick("turn"),fade:pick("fade")};
   }
-  function updateDiscHud(){
-    const d=readDiscNumbers(selectedDiscElement());
-    if(hudName)hudName.textContent=d.name;
-    [d.speed,d.glide,d.turn,d.fade].forEach((v,i)=>{if(hudNums[i])hudNums[i].textContent=v});
-  }
+  function updateDiscHud(){}
+
   function drawMiniMap(){
     if(!miniCanvas||!miniCtx)return;
     const r=miniCanvas.getBoundingClientRect(),ratio=Math.min(devicePixelRatio||1,2);
@@ -2352,16 +2392,22 @@ if (cameraApiAvailable) {
     miniCtx.strokeStyle="#4b6170";miniCtx.lineWidth=2;miniCtx.beginPath();miniCtx.moveTo(bx,by);miniCtx.lineTo(bx,by+10);miniCtx.stroke();
     // Player/current lie can pass beyond the basket; don't clamp overthrows to the pin.
     const progress=(lie.downrange||0)/hd;
-    const py=h*.92-progress*h*.82;
+    const py=Math.max(8,Math.min(h-8,h*.92-progress*h*.82));
     const px=mapX(Math.min(hd,Math.max(0,lie.downrange||0)))+Math.max(-w*.23,Math.min(w*.23,(lie.lateral||0)*1.2));
     miniCtx.fillStyle="#ffffff";miniCtx.strokeStyle="#244c67";miniCtx.lineWidth=2;
     miniCtx.beginPath();miniCtx.arc(px,py,6,0,Math.PI*2);miniCtx.fill();miniCtx.stroke();
     miniCtx.strokeStyle="rgba(36,76,103,.55)";miniCtx.setLineDash([4,4]);miniCtx.beginPath();miniCtx.moveTo(px,py);miniCtx.lineTo(bx,by);miniCtx.stroke();miniCtx.setLineDash([]);
   }
+  const SIM_TYPES=["driver","midrange","putter"];
+  window.simDiscType=window.simDiscType||"driver";
+  function setSimDisc(type){
+    if(!SIM_TYPES.includes(type))return;
+    window.simDiscType=type;
+    document.querySelectorAll(".sim-disc-type").forEach(b=>b.classList.toggle("selected",b.dataset.simDisc===type));
+  }
   function clickDisc(delta){
-    const opts=visibleDiscOptions();
-    if(!opts.length)return;let i=opts.findIndex(e=>e.classList.contains("selected")||e.getAttribute("aria-pressed")==="true");
-    if(i<0)i=0;opts[(i+delta+opts.length)%opts.length].click();
+    let i=SIM_TYPES.indexOf(window.simDiscType||"driver");
+    setSimDisc(SIM_TYPES[(i+delta+SIM_TYPES.length)%SIM_TYPES.length]);
   }
   function nextHoleKey(){const b=[...document.querySelectorAll("button")].find(x=>/next hole/i.test(x.textContent));if(b&&!b.disabled)b.click();}
   async function big(){
@@ -2370,11 +2416,14 @@ if (cameraApiAvailable) {
     try{if(on&&document.documentElement.requestFullscreen)await document.documentElement.requestFullscreen();else if(!on&&document.fullscreenElement)await document.exitFullscreen()}catch(_){}
     setTimeout(resize,80);
   }
-  document.querySelector("#hud-prev-disc")?.addEventListener("click",()=>{clickDisc(-1);setTimeout(updateDiscHud,20)});
-  document.querySelector("#hud-next-disc")?.addEventListener("click",()=>{clickDisc(1);setTimeout(updateDiscHud,20)});
+  document.querySelectorAll(".sim-disc-type").forEach(b=>b.addEventListener("click",()=>setSimDisc(b.dataset.simDisc)));
+  setSimDisc(window.simDiscType);
   bigScreenButton?.addEventListener("click",big);
   document.addEventListener("keydown",e=>{
     const tag=e.target?.tagName?.toLowerCase();if(["input","textarea","select"].includes(tag))return;
+    if(e.code==="Digit1"){e.preventDefault();setSimDisc("driver")}
+    if(e.code==="Digit2"){e.preventDefault();setSimDisc("midrange")}
+    if(e.code==="Digit3"){e.preventDefault();setSimDisc("putter")}
     if(e.code==="ArrowRight"){e.preventDefault();clickDisc(1)}
     if(e.code==="ArrowLeft"){e.preventDefault();clickDisc(-1)}
     if(e.code==="KeyN"){e.preventDefault();nextHoleKey()}

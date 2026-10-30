@@ -2149,7 +2149,7 @@ if (cameraApiAvailable) {
   const ctx=canvas.getContext("2d");
   const miniCanvas=document.querySelector("#wii-mini-map-canvas");
   const miniCtx=miniCanvas?.getContext("2d");
-  let dpr=1, anim=null, visualDisc=null, lastLie={lateral:0,downrange:0}, displayLie={lateral:0,downrange:0};
+  let dpr=1, anim=null, cameraMoveAnim=null, visualDisc=null, lastLie={lateral:0,downrange:0}, displayLie={lateral:0,downrange:0};
 
   function holeSafe(){ try{return typeof currentHole==="function"?currentHole():null}catch(_){return null} }
   function lieSafe(){ try{return currentLie?{lateral:currentLie.lateral||0,downrange:currentLie.downrange||0}:{lateral:0,downrange:0}}catch(_){return {lateral:0,downrange:0}} }
@@ -2160,36 +2160,11 @@ if (cameraApiAvailable) {
   }
   function project(lateral, forward, height=0){
     const w=canvas.clientWidth,h=canvas.clientHeight;
-    const depth=Math.max(0,forward);
-    const t=Math.min(1.35,depth/300);
-    const horizon=h*.31, bottom=h*.92;
-    const y=bottom-(bottom-horizon)*(1-Math.exp(-depth/105))-height*(1.4-t*.7);
-    const spread=(w*.42)*(1-t*.76);
-    const x=w/2+(lateral/55)*spread;
-    return {x,y,scale:Math.max(.18,1-t*.78)};
-  }
-
-  const COURSE_LAYOUTS = [
-    {name:"Opening Lane", bend:0, width:42, trees:"both", feature:"open"},
-    {name:"Pine Gap", bend:-18, width:30, trees:"both", feature:"gap"},
-    {name:"Long Meadow", bend:10, width:52, trees:"sparse", feature:"meadow"},
-    {name:"Left Bend", bend:-34, width:34, trees:"right", feature:"dogleg-left"},
-    {name:"Creek Run", bend:20, width:32, trees:"both", feature:"creek"},
-    {name:"Big Drive", bend:0, width:58, trees:"sparse", feature:"long"},
-    {name:"Right Window", bend:32, width:30, trees:"left", feature:"dogleg-right"},
-    {name:"Uphill Finish", bend:-12, width:38, trees:"both", feature:"uphill"},
-    {name:"Home Stretch", bend:16, width:40, trees:"both", feature:"finish"}
-  ];
-  function layoutSafe(){
-    const i=typeof currentHoleIndex==="number"?currentHoleIndex:0;
-    return COURSE_LAYOUTS[Math.max(0,Math.min(COURSE_LAYOUTS.length-1,i))];
-  }
-  function centerAt(z,total){
-    const L=layoutSafe(), p=Math.max(0,Math.min(1,z/Math.max(1,total)));
-    // View is re-oriented after every landing so the basket is straight ahead.
-    // The dogleg terrain still curves, but the target endpoint is centered.
-    const raw=L.bend*(p*p*(3-2*p));
-    return raw - L.bend*p;
+    const depth=Math.max(0,forward),t=Math.min(1.35,depth/330);
+    const horizon=h*.40,bottom=h*.985;
+    const y=bottom-(bottom-horizon)*(1-Math.exp(-depth/100))-height*(1.62-t*.72);
+    const spread=w*.51*(1-t*.77);
+    return{x:w/2+(lateral/62)*spread,y,scale:Math.max(.17,1-t*.79)};
   }
   function tree(x,z){
     const p=project(x,z),s=p.scale;
@@ -2245,6 +2220,17 @@ if (cameraApiAvailable) {
     }
 
 // Curved fairway: each of the 9 holes has its own width/bend/layout.
+    // First-person foreground around the exact current lie.
+    const fpSeed=Math.round(displayLie.downrange*5)+Math.round(displayLie.lateral*11)+(typeof currentHoleIndex==="number"?currentHoleIndex:0)*31;
+    ctx.fillStyle="rgba(30,72,38,.34)";
+    for(let i=0;i<32;i++){
+      const gx=((i*97+fpSeed*13)%Math.max(1,w));
+      const gy=h*.76+(((i*53+fpSeed*7)%100)/100)*h*.22;
+      ctx.beginPath();ctx.arc(gx,gy,1.5+Math.abs((i+fpSeed)%4),0,Math.PI*2);ctx.fill();
+    }
+    ctx.strokeStyle="rgba(255,255,255,.68)";ctx.lineWidth=2;
+    ctx.beginPath();ctx.ellipse(w*.5,h*.965,28,6,0,0,Math.PI*2);ctx.stroke();
+
     const layout=layoutSafe(), total=Math.max(remaining,40);
     ctx.fillStyle="#73ad58";
     const leftPts=[],rightPts=[];
@@ -2278,7 +2264,10 @@ if (cameraApiAvailable) {
     if(layout.feature==="gap"){
       const z=total*.48,c=centerAt(z,total);tree(c-14,z);tree(c+14,z);
     }
-    basket(remaining, centerAt(remaining,total));
+    const nearLayout=layoutSafe();
+    if(nearLayout.trees!=="right") tree(-52,18);
+    if(nearLayout.trees!=="left") tree(52,21);
+    basket(remaining,0);
     const d=visualDisc || {lateral:0,forward:0,height:1.2};
     const dp=project(d.lateral,d.forward,d.height);
     ctx.save();ctx.translate(dp.x,dp.y);ctx.rotate(d.roll||0);
@@ -2287,45 +2276,74 @@ if (cameraApiAvailable) {
     const hi=document.querySelector("#wii-hole-label"),di=document.querySelector("#wii-distance-label");
     if(hi)hi.textContent=`HOLE ${(typeof currentHoleIndex==="number"?currentHoleIndex:0)+1} · ${hole.name||""}`;
     if(di)di.textContent=overthrown
-      ? `${Math.round(remaining)} FT PAST PIN · PAR ${hole.par||3}`
+      ? `${Math.round(remaining)} FT PAST PIN · FACING BACK TO BASKET · PAR ${hole.par||3}`
       : `${Math.round(remaining)} FT LEFT · PAR ${hole.par||3}`;
     drawMiniMap();
     updateDiscHud();
   }
   function fly(before,after){
     if(anim)cancelAnimationFrame(anim);
-    const dx=(after.lateral||0)-(before.lateral||0);
-    const dz=(after.downrange||0)-(before.downrange||0);
+
+    // Work out the actual throw distance from old lie to new lie.
+    const globalDX=(after.lateral||0)-(before.lateral||0);
+    const globalDZ=(after.downrange||0)-(before.downrange||0);
+    const throwLen=Math.max(1,Math.hypot(globalDX,globalDZ));
+
+    // The camera is always facing the basket, so screen-forward is toward the target.
+    // Use only the measured aim as a small left/right screen offset.
+    let aimDeg=0;
+    try{ aimDeg=Number(controls?.aim?.value||0); }catch(_){}
+    const aimRad=aimDeg*Math.PI/180;
+    const screenForward=Math.max(1,throwLen*Math.cos(aimRad));
+    const screenLateral=throwLen*Math.sin(aimRad);
+
     const start=performance.now();
-    const throwLen=Math.max(1,Math.hypot(dx,dz));
-    const dur=Math.max(850,Math.min(2300,780+throwLen*5.5));
-    // Smooth flight: gentle early turn, late fade, and one continuous height arc.
+    const dur=Math.max(900,Math.min(2500,850+throwLen*5.2));
     const type=window.simDiscType||"driver";
-    const curveStrength=type==="putter"?0.8:type==="midrange"?1.5:2.5;
+    const curve=type==="driver"?2.2:type==="midrange"?1.25:.55;
+
     function frame(now){
       const t=Math.min(1,(now-start)/dur);
-      const smooth=t*t*(3-2*t);
-      const lateralCurve=Math.sin(Math.PI*t)*curveStrength*(t<.58?-0.45:0.75);
-      const heightPeak=Math.min(20,4+throwLen*.05);
-      const height=1.15+Math.sin(Math.PI*t)*heightPeak*(0.92+0.08*Math.cos(Math.PI*t));
+      const e=t*t*(3-2*t);
+
+      // One smooth disc-golf-like arc: slight turn early, gentle fade late.
+      const turnFade=Math.sin(Math.PI*t) * curve * (t-.42);
+      const peak=Math.min(18,3.5+throwLen*.045);
+      const height=.18 + Math.sin(Math.PI*t)*peak;
+
       visualDisc={
-        lateral:dx*smooth+lateralCurve,
-        forward:dz*smooth,
+        lateral:screenLateral*e+turnFade,
+        forward:screenForward*e,
         height,
-        roll:(type==="driver"?0.18:type==="midrange"?0.11:0.06)*Math.sin(Math.PI*t)
+        roll:.08*Math.sin(Math.PI*t)
       };
       draw();
+
       if(t<1){
         anim=requestAnimationFrame(frame);
       }else{
-        // Land exactly where physics says the disc landed, then move the viewpoint.
-        visualDisc={lateral:dx,forward:dz,height:0.18,roll:0};
+        // Show the disc at the exact visual landing point first.
+        visualDisc={lateral:screenLateral,forward:screenForward,height:.12,roll:0};
         draw();
+
         setTimeout(()=>{
-          anim=null; visualDisc=null;
-          displayLie={...after}; lastLie={...after};
-          draw();
-        },180);
+          anim=null;
+          const from={...displayLie},to={...after},started=performance.now(),duration=760;
+          function goToLie(now2){
+            const q=Math.min(1,(now2-started)/duration),e=q*q*(3-2*q);
+            displayLie={
+              lateral:from.lateral+(to.lateral-from.lateral)*e,
+              downrange:from.downrange+(to.downrange-from.downrange)*e
+            };
+            visualDisc={lateral:0,forward:Math.max(0,10*(1-e)),height:.08,roll:0};
+            draw();
+            if(q<1)cameraMoveAnim=requestAnimationFrame(goToLie);
+            else{
+              cameraMoveAnim=null;displayLie={...to};lastLie={...to};visualDisc=null;draw();
+            }
+          }
+          cameraMoveAnim=requestAnimationFrame(goToLie);
+        },300);
       }
     }
     anim=requestAnimationFrame(frame);
@@ -2375,7 +2393,7 @@ if (cameraApiAvailable) {
     miniCtx.strokeStyle="#4b6170";miniCtx.lineWidth=2;miniCtx.beginPath();miniCtx.moveTo(bx,by);miniCtx.lineTo(bx,by+10);miniCtx.stroke();
     // Player/current lie can pass beyond the basket; don't clamp overthrows to the pin.
     const progress=(lie.downrange||0)/hd;
-    const py=h*.92-progress*h*.82;
+    const py=Math.max(8,Math.min(h-8,h*.92-progress*h*.82));
     const px=mapX(Math.min(hd,Math.max(0,lie.downrange||0)))+Math.max(-w*.23,Math.min(w*.23,(lie.lateral||0)*1.2));
     miniCtx.fillStyle="#ffffff";miniCtx.strokeStyle="#244c67";miniCtx.lineWidth=2;
     miniCtx.beginPath();miniCtx.arc(px,py,6,0,Math.PI*2);miniCtx.fill();miniCtx.stroke();
@@ -2415,7 +2433,7 @@ if (cameraApiAvailable) {
   lastLie=lieSafe(); displayLie={...lastLie};
   setInterval(()=>{
     const l=lieSafe();
-    if(!anim&&(Math.abs(l.lateral-lastLie.lateral)>.01||Math.abs(l.downrange-lastLie.downrange)>.01)){
+    if(!anim&&!cameraMoveAnim&&(Math.abs(l.lateral-lastLie.lateral)>.01||Math.abs(l.downrange-lastLie.downrange)>.01)){
       const b={...displayLie};
       lastLie={...l};
 
@@ -2438,7 +2456,7 @@ if (cameraApiAvailable) {
         lastDetail.textContent=`${mph} mph · Aim ${aim} · ${angle}`;
       }
       fly(b,l);
-    } else if(!anim) draw();
+    } else if(!anim&&!cameraMoveAnim) draw();
   },100);
   window.addEventListener("resize",resize);
   resize();

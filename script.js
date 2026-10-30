@@ -2183,7 +2183,7 @@ if (cameraApiAvailable) {
     ctx.fillStyle="#28633b";ctx.beginPath();ctx.moveTo(p.x,p.y-78*s);ctx.lineTo(p.x-24*s,p.y-28*s);ctx.lineTo(p.x+24*s,p.y-28*s);ctx.closePath();ctx.fill();
   }
   function basket(z){
-    z=Math.max(5,z);const p=P(0,z,0),s=Math.max(.28,p.s);
+    z=Math.max(5,z);const p=P(0,z,0),s=Math.max(.14,p.s);
     ctx.strokeStyle="#e6e8e8";ctx.lineWidth=Math.max(1.5,2.5*s);ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(p.x,p.y-53*s);ctx.stroke();
     ctx.fillStyle="#ffd43b";ctx.fillRect(p.x-18*s,p.y-52*s,36*s,7*s);
     ctx.strokeStyle="#d8dadd";ctx.lineWidth=Math.max(1,1.2*s);
@@ -2226,6 +2226,21 @@ if (cameraApiAvailable) {
     ctx.fillStyle="#75ae59";ctx.beginPath();
     right.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
     left.reverse().forEach(p=>ctx.lineTo(p.x,p.y));ctx.closePath();ctx.fill();
+    // Distance bands every 25 ft make long flights visibly travel down the course.
+    for(let z=25;z<Math.min(maxZ,targetDist);z+=25){
+      const c=fairwayPoint(z,targetDist),half=L.width/2;
+      const a=P(c-half,z,.02),b=P(c+half,z,.02);
+      ctx.strokeStyle=z%100===0?"rgba(255,255,255,.62)":"rgba(255,255,255,.27)";
+      ctx.lineWidth=z%100===0?2.4:1.2;
+      ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+      if(z%50===0){
+        const lp=P(c-half+2,z,.05);
+        ctx.fillStyle="rgba(255,255,255,.82)";
+        ctx.font=`${Math.max(9,Math.min(14,9+lp.s*2))}px sans-serif`;
+        ctx.fillText(`${z} ft`,lp.x+3,lp.y-3);
+      }
+    }
+
 
     // Strongly different hole terrain.
     if(L.kind==="creek"){const z=Math.min(targetDist*.55,120),a=P(-50,z),b=P(50,z);ctx.strokeStyle="#4ca7d8";ctx.lineWidth=Math.max(5,P(0,z).s*12);ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke()}
@@ -2257,12 +2272,24 @@ if (cameraApiAvailable) {
   function fly(before,after){
     if(anim)cancelAnimationFrame(anim);
     const dx=(after.lateral||0)-(before.lateral||0),dz=(after.downrange||0)-(before.downrange||0),len=Math.max(1,Math.hypot(dx,dz));
-    let aim=0;try{aim=Number(controls?.aim?.value||0)}catch(_){}
-    const ar=aim*Math.PI/180,endX=len*Math.sin(ar),endZ=Math.max(2,len*Math.cos(ar));
-    const started=performance.now(),duration=Math.max(900,Math.min(2400,800+len*5.4));
+    let aim=0,hyzer=0;
+    try{aim=Number(controls?.aim?.value||0);hyzer=Number(controls?.hyzer?.value||0)}catch(_){}
+    const ar=aim*Math.PI/180;
+    const endX=len*Math.sin(ar),endZ=Math.max(2,len*Math.cos(ar));
+    const started=performance.now(),duration=Math.max(900,Math.min(2600,820+len*5.6));
+    // Hyzer/anhyzer is deliberately visible in the flight line.
+    // Negative = hyzer, positive = anhyzer in this simulator's existing convention.
+    const curveAmount=Math.max(-30,Math.min(30,hyzer))*.23*(len/100);
     function f(now){
       const t=Math.min(1,(now-started)/duration),e=t*t*(3-2*t);
-      disc={x:endX*e+Math.sin(Math.PI*t)*(t-.45)*2,z:endZ*e,y:.15+Math.sin(Math.PI*t)*Math.min(18,3.5+len*.045),roll:.08*Math.sin(Math.PI*t)};
+      // Curve grows through mid-flight and still lands exactly at the physics result.
+      const curve=Math.sin(Math.PI*t)*curveAmount*(.45+t*.75);
+      disc={
+        x:endX*e+curve,
+        z:endZ*e,
+        y:.15+Math.sin(Math.PI*t)*Math.min(19,3.5+len*.048),
+        roll:(hyzer*Math.PI/180)*.55*Math.sin(Math.PI*t)
+      };
       draw();
       if(t<1)anim=requestAnimationFrame(f);else{
         disc={x:endX,z:endZ,y:.08,roll:0};draw();
